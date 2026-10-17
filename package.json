@@ -1,6 +1,6 @@
 {
   "name": "@carlosgtrz/t3-import",
-  "version": "0.4.1",
+  "version": "0.5.0-v2.0",
   "description": "Import, synchronize, and safely replace Codex and Claude Code conversations in T3 Code",
   "keywords": [
     "t3code",
@@ -29,6 +29,7 @@
   },
   "files": [
     "dist",
+    "vendor/t3-v010",
     "README.md",
     "LICENSE"
   ],
@@ -42,7 +43,9 @@
     "release:check": "npm publish --dry-run --access public",
     "compat:prepare": "node scripts/compatibility/prepare.mjs",
     "compat:schemas": "node scripts/compatibility/generate-schemas.mjs",
-    "test:compatibility": "npm run compat:prepare && tsx scripts/compatibility/run.ts"
+    "test:compatibility": "npm run compat:prepare && tsx scripts/compatibility/run.ts",
+    "vendor:v2": "node scripts/v2/build-runtime.mjs",
+    "compat:v2-schema": "node scripts/v2/generate-schema.mjs"
   },
   "engines": {
     "node": ">=22"
@@ -54,6 +57,7 @@
   "dependencies": {
     "better-sqlite3": "^12.2.0",
     "commander": "^14.0.0",
+    "effect": "4.0.4",
     "env-paths": "^3.0.0",
     "ink": "^6.2.3",
     "react": "^19.1.1",
@@ -63,6 +67,7 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.17.2",
     "@types/react": "^19.1.10",
+    "esbuild": "0.28.2",
     "ink-testing-library": "^4.0.0",
     "tsx": "^4.20.4",
     "typescript": "^5.9.2",
