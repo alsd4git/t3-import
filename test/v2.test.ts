@@ -36,6 +36,10 @@ it("prefers V2 and projects a resumable import through the official sink", async
     expect(db.prepare("SELECT status FROM orchestration_v2_projection_provider_threads").all()).toEqual([{ status: "not_loaded" }]);
     expect(db.prepare("SELECT * FROM provider_session_runtime").all()).toEqual([]);
     expect(db.prepare("SELECT * FROM orchestration_v2_effect_outbox").all()).toEqual([]);
+    expect(db.prepare("SELECT type FROM orchestration_v2_projection_turn_items ORDER BY ordinal").all()).toEqual([
+      { type: "user_message" }, { type: "command_execution" }, { type: "assistant_message" },
+    ]);
+    expect(db.prepare("SELECT COUNT(*) n FROM orchestration_events WHERE json_extract(metadata_json,'$.t3ImportTerminalStatus')='completed'").get()).toEqual({ n: 1 });
   } finally { db.close(); }
   const count = eventCount(paths.dbPath);
   expect(result.results[0]!.events).toBe(count);
@@ -43,6 +47,23 @@ it("prefers V2 and projects a resumable import through the official sink", async
   expect((await importConversations([{ conversation, resume: true }], paths, { dryRun: false, resume: true })).status).toBe("already-imported");
   expect((await syncConversations([{ conversation }], paths, { dryRun: false })).status).toBe("up-to-date");
   expect(eventCount(paths.dbPath)).toBe(count);
+});
+
+it.each(["failed", "interrupted"] as const)("keeps %s imported turns visible as notices", async (status) => {
+  const paths = createTarget(root, 62);
+  const conversation = canonicalConversation(root);
+  conversation.threads[0]!.turns[0]!.status = status;
+  if (status === "failed") conversation.threads[0]!.turns[0]!.terminalError = "Provider failed";
+  await importConversations([{ conversation, resume: true }], paths, { dryRun: false, resume: true });
+  const db = new Database(paths.dbPath, { readonly: true });
+  try {
+    const rows = db.prepare("SELECT payload_json payload FROM orchestration_v2_projection_turn_items WHERE type='system_notice'").all() as Array<{ payload: string }>;
+    expect(rows).toHaveLength(1);
+    expect(JSON.parse(rows[0]!.payload)).toMatchObject({
+      status, message: status === "failed" ? "Imported turn failed: Provider failed" : "Imported turn interrupted.",
+    });
+  } finally { db.close(); }
+  expect((await inspectConversationSync(conversation, paths)).status).toBe("up-to-date");
 });
 
 it("rolls back official event/projection writes and removes staged attachments on failure", async () => {

@@ -105,7 +105,7 @@ export function v2Events(db: Database.Database, plan: PlannedThread): Json[] {
     completedAt: row.occurredAt, updatedAt: row.occurredAt,
   });
   // V1 settles before its per-projector replay. V2 commits projections together,
-  // so place each terminal notice after that turn's messages and activities.
+  // so record each terminal boundary after that turn's messages and activities.
   const ordered: PlannedEvent[] = [];
   let terminal: PlannedEvent | undefined;
   for (const row of plan.events) {
@@ -168,7 +168,19 @@ export function v2Events(db: Database.Database, plan: PlannedThread): Json[] {
     } else if (row.type === "thread.session-set" && row.key.endsWith(".settled")) {
       const session = row.payload.session as Json;
       const status = session.status === "error" ? "failed" : session.status === "ready" ? "completed" : "interrupted";
-      const value = emit(row, "turn-item.updated", { ...itemBase(row, deterministicUuid(`${row.eventId}:terminal`)), type: "system_notice", status, message: `Imported turn ${status}${session.lastError ? `: ${session.lastError}` : "."}` });
+      // A completed turn needs a durable terminal boundary for sync recovery,
+      // but system_notice renders as a warning in T3. Reassert its last item
+      // unchanged instead of creating a visible notice for normal completion.
+      const lastItem = status === "completed"
+        ? events.findLast((event) => event.type === "turn-item.updated")
+        : undefined;
+      if (status === "completed" && !lastItem) throw safetyError("A completed imported turn has no transcript item.");
+      const payload = lastItem ? lastItem.payload as Json : {
+        ...itemBase(row, deterministicUuid(`${row.eventId}:terminal`)),
+        type: "system_notice", status,
+        message: `Imported turn ${status}${session.lastError ? `: ${session.lastError}` : "."}`,
+      };
+      const value = emit(row, "turn-item.updated", payload);
       (value.importMetadata as Json).t3ImportTerminalStatus = status;
     }
   }
