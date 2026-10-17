@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { generateV2Schema } from "../v2/generate-schema.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const refs = JSON.parse(readFileSync(join(root, "scripts/compatibility/references.json"), "utf8"));
@@ -23,4 +24,5 @@ for (const ref of refs) {
   console.log(`Generated actual migration-${ref.migration} schema`);
 }
 mkdirSync(join(root, "test/fixtures"), { recursive: true });
+schemas[62] = await generateV2Schema();
 writeFileSync(join(root, "test/fixtures/t3-schemas.json"), JSON.stringify(schemas, null, 2) + "\n");

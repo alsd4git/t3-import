@@ -12,11 +12,13 @@ import type {
   CanonicalTerminalTurnStatus,
 } from "../core/types.js";
 import { isTerminalTurn } from "../core/types.js";
-import { checkpointForThread, legacyTurnSemanticHash, turnSemanticHash, type ImportCheckpoint, type ImportCheckpointV2 } from "../core/checkpoint.js";
+import { checkpointForThread, legacyTurnSemanticHash, parseCheckpoint, turnSemanticHash, type ImportCheckpoint, type ImportCheckpointV2 } from "../core/checkpoint.js";
 import { canonicalPath, deterministicUuid, isObject, sha256, stringValue } from "../core/util.js";
 import { safetyError, writeError } from "../core/errors.js";
 import type { ProviderSelection, TargetOverrides } from "./config.js";
-import { assertT3Closed, targetMigration, validateTargetDatabase } from "./schema.js";
+import { assertT3Closed, isV2Database, targetMigration, validateTargetDatabase } from "./schema.js";
+import { assertV2ThreadSettled, prepareV2Write, v2ProviderThreads, v2SourceConflict, v2Thread } from "./v2.js";
+import { threadWorkingDirectory } from "./destination.js";
 import { listImports, recordImports, type LedgerRecord, type StoredLedgerRecord } from "./ledger.js";
 import {
   IMPORTER_VERSION,
@@ -66,12 +68,39 @@ export function readEvents(db: Database.Database, threadId: string): EventRow[] 
     SELECT sequence, event_id eventId, event_type type, payload_json payload, metadata_json metadata
     FROM orchestration_events WHERE aggregate_kind = 'thread' AND stream_id = ? ORDER BY sequence
   `).all(threadId) as Array<{ sequence: number; eventId: string; type: string; payload: string; metadata: string }>;
-  return rows.flatMap((row) => {
+  const parsed = rows.flatMap((row) => {
     try {
       const payload = JSON.parse(row.payload) as unknown;
       const metadata = JSON.parse(row.metadata) as unknown;
       return isObject(payload) && isObject(metadata) ? [{ ...row, payload, metadata }] : [];
     } catch { return []; }
+  });
+  if (!isV2Database(db)) return parsed;
+  // A migrated thread retains its original V1 event stream. T3's lazy V1
+  // transcript copies are the same history, not a second set of messages.
+  const turns = db.prepare("SELECT payload_json payload FROM orchestration_v2_projection_provider_turns WHERE provider_thread_id IN (SELECT provider_thread_id FROM orchestration_v2_projection_provider_threads WHERE thread_id=?)").all(threadId) as Array<{ payload: string }>;
+  const nativeTurns = new Map(turns.map((row) => {
+    const turn = JSON.parse(row.payload) as Record<string, unknown>;
+    const native = isObject(turn.nativeTurnRef) ? stringValue(turn.nativeTurnRef.nativeId) : undefined;
+    return [String(turn.id), native];
+  }));
+  const items = db.prepare("SELECT payload_json payload FROM orchestration_v2_projection_turn_items WHERE thread_id=? AND type IN ('user_message','assistant_message')").all(threadId) as Array<{ payload: string }>;
+  const messageTurns = new Map(items.map((row) => {
+    const item = JSON.parse(row.payload) as Record<string, unknown>;
+    return [String(item.messageId), nativeTurns.get(String(item.providerTurnId))];
+  }));
+  return parsed.flatMap((row): EventRow[] => {
+    if (row.eventId.startsWith("migration:v1:")) return [];
+    if (row.type === "message.updated") return [{ ...row, type: "thread.message-sent", payload: { ...row.payload, messageId: row.payload.id, turnId: messageTurns.get(String(row.payload.id)) ?? row.metadata.providerTurnId, streaming: false } }];
+    if (row.type === "provider-turn.updated") {
+      const nativeId = isObject(row.payload.nativeTurnRef) ? stringValue(row.payload.nativeTurnRef.nativeId) : undefined;
+      const status = row.payload.status === "completed" ? "ready" : row.payload.status === "failed" ? "error" : ["interrupted", "cancelled"].includes(String(row.payload.status)) ? "interrupted" : undefined;
+      return status && nativeId ? [{ ...row, type: "thread.session-set", metadata: { ...row.metadata, providerTurnId: nativeId, v2Native: true }, payload: { session: { status } } }] : [];
+    }
+    if (row.type === "thread.metadata-updated") return [{ ...row, type: "thread.meta-updated", payload: { ...row.payload, threadId } }];
+    if (row.type === "turn-item.updated" && row.metadata.t3ImportTerminalStatus) return [{ ...row, type: "thread.session-set", payload: { session: { status: row.metadata.t3ImportTerminalStatus === "completed" ? "ready" : row.metadata.t3ImportTerminalStatus === "failed" ? "error" : "interrupted" } } }];
+    if (row.type === "thread.created") return [{ ...row, payload: { ...row.payload, threadId } }];
+    return [row];
   });
 }
 
@@ -80,6 +109,10 @@ export function createEvent(events: EventRow[]): EventRow | undefined {
 }
 
 export function currentTitle(db: Database.Database, threadId: string, events: EventRow[]): string {
+  if (isV2Database(db)) {
+    const title = stringValue(v2Thread(db, threadId)?.title);
+    if (title) return title;
+  }
   const table = db.prepare("SELECT 1 found FROM sqlite_master WHERE type='table' AND name='projection_threads'").get();
   if (table) {
     const row = db.prepare("SELECT title FROM projection_threads WHERE thread_id = ? AND deleted_at IS NULL").get(threadId) as { title: string } | undefined;
@@ -99,7 +132,8 @@ export function existingProvider(db: Database.Database, thread: CanonicalThread,
     SELECT provider_name providerName, provider_instance_id instanceId, adapter_key adapterKey
     FROM provider_session_runtime WHERE thread_id = ?
   `).get(record.threadId) as { providerName: "codex" | "claudeAgent"; instanceId: string; adapterKey: "codex" | "claudeAgent" } | undefined;
-  const createdSelection = createEvent(events)?.payload.modelSelection;
+  const current = isV2Database(db) ? v2Thread(db, record.threadId) : undefined;
+  const createdSelection = current?.modelSelection ?? createEvent(events)?.payload.modelSelection;
   const selection = isObject(createdSelection) ? createdSelection : {};
   const options = Array.isArray(selection.options)
     ? selection.options.filter((value): value is { id: string; value: string | boolean } => isObject(value) && typeof value.id === "string" && (typeof value.value === "string" || typeof value.value === "boolean"))
@@ -107,7 +141,7 @@ export function existingProvider(db: Database.Database, thread: CanonicalThread,
   const providerName = runtime?.providerName ?? (thread.source === "codex" ? "codex" : "claudeAgent");
   return {
     providerName,
-    instanceId: runtime?.instanceId ?? stringValue(selection.instanceId) ?? providerName,
+    instanceId: stringValue(current?.providerInstanceId) ?? runtime?.instanceId ?? stringValue(selection.instanceId) ?? providerName,
     adapterKey: runtime?.adapterKey ?? providerName,
     model: stringValue(selection.model) ?? thread.model,
     options,
@@ -125,6 +159,30 @@ function nativeCodexRecord(
   paths: TargetPaths,
   thread: CanonicalThread,
 ): StoredLedgerRecord | undefined {
+  if (isV2Database(db)) {
+    const linked = v2ProviderThreads(db).filter((row) => row.driver === "codex" && isObject(row.nativeThreadRef) && row.nativeThreadRef.driver === "codex" && row.nativeThreadRef.strength === "strong"
+      && row.nativeThreadRef.nativeId === thread.sourceSessionId && typeof row.appThreadId === "string"
+      && !v2Thread(db, row.appThreadId)?.deletedAt);
+    const ids = [...new Set(linked.map((row) => String(row.appThreadId)))];
+    if (ids.length > 1) throw safetyError("Multiple V2 threads refer to this source provider session. Resolve the ambiguous binding before synchronizing.");
+    const threadId = ids[0];
+    if (threadId) {
+      const events = readEvents(db, threadId);
+      const created = createEvent(events);
+      const projectId = stringValue(created?.payload.projectId);
+      if (created && projectId && canonicalPath(threadWorkingDirectory(db, threadId, "").cwd) === canonicalPath(thread.workspace)) {
+        return { targetId: targetId(paths), source: "codex", sourceSessionId: thread.sourceSessionId,
+          sourceKey: thread.sourceKey, sourceFingerprint: "", projectId, threadId,
+          importedAt: stringValue(created.payload.createdAt) ?? thread.createdAt,
+          importerVersion: "native-adoption", migration: targetMigration(db),
+          firstSequence: created.sequence, lastSequence: events.at(-1)?.sequence ?? created.sequence,
+          resumable: true, backupPath: "", warnings: [],
+          identitySeed: `${NATIVE_CODEX_SEED_PREFIX}${thread.sourceSessionId}:${threadId}`,
+          currentSourceKey: thread.sourceKey, sourceTitle: thread.title, isCanonical: true };
+      }
+      return undefined;
+    }
+  }
   const candidates = db.prepare(`
     SELECT thread_id threadId, resume_cursor_json cursor, runtime_payload_json runtime, status
     FROM provider_session_runtime
@@ -175,6 +233,9 @@ function nativeCodexRecord(
 
 export function validRecord(db: Database.Database, record: StoredLedgerRecord): boolean {
   if (record.identitySeed.startsWith(NATIVE_CODEX_SEED_PREFIX)) {
+    if (isV2Database(db) && v2ProviderThreads(db, record.threadId).some((row) => row.driver === "codex" && isObject(row.nativeThreadRef) && row.nativeThreadRef.driver === "codex" && row.nativeThreadRef.strength === "strong" && row.nativeThreadRef.nativeId === record.sourceSessionId)) {
+      return Boolean(v2Thread(db, record.threadId)) && !v2Thread(db, record.threadId)?.deletedAt;
+    }
     const runtime = db.prepare(`
       SELECT resume_cursor_json cursor FROM provider_session_runtime
       WHERE thread_id = ? AND provider_name = 'codex' AND adapter_key = 'codex'
@@ -200,6 +261,7 @@ export function fallbackRecord(db: Database.Database, paths: TargetPaths, thread
   if (thread.source === "codex") {
     threadId = thread.sourceSessionId;
   } else {
+    if (isV2Database(db)) threadId = deterministicUuid(`t3-import:thread:${thread.sourceKey}`);
     const candidates = db.prepare("SELECT thread_id threadId, resume_cursor_json cursor FROM provider_session_runtime WHERE provider_name = 'claudeAgent'").all() as Array<{ threadId: string; cursor: string | null }>;
     for (const candidate of candidates) {
       try {
@@ -266,8 +328,8 @@ function replacementMetadataRecord(db: Database.Database, paths: TargetPaths, th
         sourceKey, sourceFingerprint: "", projectId, threadId: row.threadId,
         importedAt: stringValue(payload.createdAt) ?? thread.createdAt, importerVersion: "metadata-recovered",
         migration: targetMigration(db), firstSequence: row.sequence,
-        lastSequence: events.at(-1)?.sequence ?? row.sequence, resumable: true, backupPath: "",
-        warnings: ["Recovered canonical replacement identity from T3 event metadata."], identitySeed,
+        lastSequence: events.at(-1)?.sequence ?? row.sequence, resumable: marker.resumable !== false, backupPath: "",
+        warnings: [isV2Database(db) ? "Recovered canonical import identity from T3 event metadata." : "Recovered canonical replacement identity from T3 event metadata."], identitySeed,
         currentSourceKey: sourceKey, sourceTitle: stringValue(payload.title) ?? thread.title,
         isCanonical: true,
       };
@@ -292,6 +354,9 @@ export function findRecord(db: Database.Database, paths: TargetPaths, thread: Ca
 }
 
 export function bootstrapCheckpoint(thread: CanonicalThread, record: StoredLedgerRecord, events: EventRow[]): { checkpoint: ImportCheckpoint; lastSequence: number } | undefined {
+  const saved = [...events].reverse().find((row) => row.metadata.t3ImportCheckpoint);
+  const savedCheckpoint = saved ? parseCheckpoint(JSON.stringify(saved.metadata.t3ImportCheckpoint)) : undefined;
+  if (savedCheckpoint) return { checkpoint: savedCheckpoint, lastSequence: saved!.sequence };
   const byId = new Map(events.map((row) => [row.eventId, row]));
   const importedEvent = (...keys: string[]): EventRow | undefined => keys
     .map((key) => byId.get(deterministicUuid(`t3-import:event:${record.identitySeed}:${key}`)))
@@ -402,6 +467,7 @@ interface NativeVisibleTurn {
 }
 
 function nativeCodexPrefixLength(thread: CanonicalThread, events: EventRow[]): number | undefined {
+  const v2Terminal = new Map(events.filter((row) => row.metadata.v2Native === true).map((row) => [stringValue(row.metadata.providerTurnId), terminalStatusFromEvent(row)]));
   const turns: NativeVisibleTurn[] = [];
   const messages = new Map<string, EventRow>();
   let active: NativeVisibleTurn | undefined;
@@ -476,6 +542,8 @@ function nativeCodexPrefixLength(thread: CanonicalThread, events: EventRow[]): n
   if (grouped.length > thread.turns.length) return undefined;
 
   for (const [index, native] of grouped.entries()) {
+    const v2Status = native.providerTurnId ? v2Terminal.get(native.providerTurnId) : undefined;
+    if (v2Status) native.status = v2Status;
     const source = thread.turns[index];
     const nativeUser = stringValue(native.user.payload.text);
     const sourceUser = source?.user.text ?? "";
@@ -545,6 +613,13 @@ function buildPlan(db: Database.Database, paths: TargetPaths, conversation: Cano
     return { conversation, thread, result, titleEvent: false, previouslyImported: match.stale };
   }
   const record = match.record;
+  if (isV2Database(db)) {
+    assertV2ThreadSettled(db, record.threadId);
+    const current = v2Thread(db, record.threadId);
+    if (current?.deletedAt) return { conversation, thread, record, result: conflictResult(thread, "target-missing", "The V2 thread is deleted.", record), titleEvent: false, previouslyImported: true };
+    const conflict = v2SourceConflict(db, record.threadId, thread);
+    if (conflict) return { conversation, thread, record, result: conflictResult(thread, "history-diverged", conflict, record), titleEvent: false, previouslyImported: true };
+  }
   const events = readEvents(db, record.threadId);
   if (!createEvent(events)) return { conversation, thread, record, result: conflictResult(thread, "target-missing", "The imported T3 task no longer exists.", record), titleEvent: false, previouslyImported: true };
   if (thread.source === "claude" && conversation.summary.branches !== 1) {
@@ -562,7 +637,7 @@ function buildPlan(db: Database.Database, paths: TargetPaths, conversation: Cano
   const adopted = nativeAdoption
     ? checkpoint ? nativeCodexAdoptedTurns(thread, sourcePrefixLength, events, record.lastSequence) : 0
     : thread.source === "codex"
-    ? codexAdoptedTurns(thread, sourcePrefixLength, events, bootstrapped?.lastSequence ?? record.lastSequence)
+    ? isV2Database(db) ? nativeCodexAdoptedTurns(thread, sourcePrefixLength, events, bootstrapped?.lastSequence ?? record.lastSequence) : codexAdoptedTurns(thread, sourcePrefixLength, events, bootstrapped?.lastSequence ?? record.lastSequence)
     : claudeAdoptedTurns(thread, sourcePrefixLength, events, bootstrapped?.lastSequence ?? record.lastSequence);
   if (adopted < 0) return { conversation, thread, record, result: conflictResult(thread, "history-diverged", "T3 contains an ambiguous or partial provider turn suffix.", record), titleEvent: false, previouslyImported: true };
   const newTurns = thread.turns.slice(sourcePrefixLength + adopted);
@@ -581,6 +656,7 @@ function buildPlan(db: Database.Database, paths: TargetPaths, conversation: Cano
   const syncThread = { ...thread, turns: newTurns, warnings };
   const turnOffset = nativeAdoption ? sourcePrefixLength : (checkpoint?.turns.length ?? sourcePrefixLength) + adopted;
   const planned = planThread(syncThread, record.threadId, record.projectId, paths, provider, record.identitySeed, undefined, record.resumable && Boolean(thread.resumeCursor), conversation.fingerprint, turnOffset, false);
+  planned.checkpoint = checkpointForThread(thread);
   if (nativeAdoption) markAsHistoricalTranscript(planned);
   if (titleAction === "updated") {
     planned.events.push(event(
@@ -679,6 +755,7 @@ export async function syncConversations(selections: SyncSelection[], paths: Targ
   const releaseLock = options.dryRun ? () => {} : acquireLock(paths);
   const db = new Database(paths.dbPath, { readonly: options.dryRun, fileMustExist: true });
   let backup: string | null = null;
+  let v2Committed = false;
   const warnings: string[] = [];
   try {
     const schema = validateTargetDatabase(db);
@@ -686,10 +763,12 @@ export async function syncConversations(selections: SyncSelection[], paths: Targ
     const writable = plans.filter((plan) => plan.planned && !hasConflict(plan.result.status));
     const eventPlans = writable.filter((plan) => plan.planned!.events.length > 0);
     const t3Plans = writable.filter((plan) => plan.planned!.events.length > 0 || plan.result.turnsAdopted > 0);
+    const v2Write = isV2Database(db) && eventPlans.length ? await prepareV2Write(db, eventPlans.map((plan) => plan.planned!)) : undefined;
+    if (v2Write) for (const plan of eventPlans) plan.result.events = plan.planned!.targetEventCount!;
     if (t3Plans.length > 0) {
       const backlog = projectionBacklog(db);
       if (backlog.backlog > 0 && !options.allowProjectionBacklog) throw safetyError(`T3 has ${backlog.backlog} unprojected event${backlog.backlog === 1 ? "" : "s"}. Open T3 and let it finish loading before synchronizing.`);
-      const count = eventPlans.reduce((sum, plan) => sum + plan.planned!.events.length, 0);
+      const count = eventPlans.reduce((sum, plan) => sum + (plan.planned!.targetEventCount ?? plan.planned!.events.length), 0);
       if (count > MAX_SAFE_IMPORT_EVENTS) throw safetyError(`Synchronization would append ${count} events, exceeding the safe one-launch limit of ${MAX_SAFE_IMPORT_EVENTS}. Sync fewer conversations at a time.`);
     }
     if (options.dryRun) return { schemaVersion: 1, status: aggregate(plans.map((plan) => plan.result), true), target: paths.dbPath, migration: schema.migration, backup: null, results: plans.map((plan) => plan.result), warnings, hasConflicts: plans.some((plan) => hasConflict(plan.result.status)) };
@@ -697,6 +776,8 @@ export async function syncConversations(selections: SyncSelection[], paths: Targ
     const assets = eventPlans.length > 0 ? materializeAssets(eventPlans.map((plan) => plan.planned!), paths, randomUUID()) : { created: [] as string[], cleanup: () => {} };
     const ledgerRecords: LedgerRecord[] = [];
     try {
+      const v2Written = v2Write ? await v2Write.write() : undefined;
+      v2Committed = Boolean(v2Written);
       const nextVersion = db.prepare("SELECT COALESCE(MAX(stream_version), -1) + 1 nextVersion FROM orchestration_events WHERE aggregate_kind = ? AND stream_id = ?");
       const insert = db.prepare(`INSERT INTO orchestration_events (event_id, aggregate_kind, stream_id, stream_version, event_type, occurred_at, command_id, causation_event_id, correlation_id, actor_kind, payload_json, metadata_json) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?)`);
       const upsertRuntime = db.prepare(`
@@ -704,20 +785,24 @@ export async function syncConversations(selections: SyncSelection[], paths: Targ
         VALUES (?, ?, ?, ?, 'full-access', 'stopped', ?, ?, ?)
         ON CONFLICT(thread_id) DO UPDATE SET provider_name=excluded.provider_name, provider_instance_id=excluded.provider_instance_id, adapter_key=excluded.adapter_key, runtime_mode=excluded.runtime_mode, status=excluded.status, last_seen_at=excluded.last_seen_at, resume_cursor_json=excluded.resume_cursor_json, runtime_payload_json=excluded.runtime_payload_json
       `);
-      db.transaction(() => {
+      const collectRecords = () => {
         for (const plan of writable) {
           const record = plan.record!;
           const planned = plan.planned!;
           let first = Number.MAX_SAFE_INTEGER;
           let last = Math.max(record.lastSequence, plan.adoptionSequence ?? record.lastSequence);
-          let version = (nextVersion.get("thread", record.threadId) as { nextVersion: number }).nextVersion;
-          for (const row of planned.events) {
+          let version = v2Written ? 0 : (nextVersion.get("thread", record.threadId) as { nextVersion: number }).nextVersion;
+          if (v2Written) {
+            const sequence = v2Written.get(planned);
+            if (sequence) { first = sequence.first; last = Math.max(last, sequence.last); }
+          }
+          for (const row of v2Written ? [] : planned.events) {
             const inserted = insert.run(row.eventId, row.aggregateKind, row.streamId, version++, row.type, row.occurredAt, row.actorKind, JSON.stringify(row.payload), JSON.stringify(row.metadata));
             const sequence = Number(inserted.lastInsertRowid);
             first = Math.min(first, sequence);
             last = Math.max(last, sequence);
           }
-          if ((planned.events.length > 0 || plan.result.turnsAdopted > 0) && planned.resumable && plan.thread.resumeCursor) {
+          if (!isV2Database(db) && (planned.events.length > 0 || plan.result.turnsAdopted > 0) && planned.resumable && plan.thread.resumeCursor) {
             const cursor = plan.thread.source === "claude" ? { threadId: record.threadId, ...plan.thread.resumeCursor } : plan.thread.resumeCursor;
             upsertRuntime.run(record.threadId, planned.provider.providerName, planned.provider.instanceId, planned.provider.adapterKey, plan.thread.updatedAt, JSON.stringify(cursor), JSON.stringify({ cwd: plan.thread.workspace, model: planned.provider.model, activeTurnId: null, lastError: null, modelSelection: { instanceId: planned.provider.instanceId, model: planned.provider.model, options: planned.provider.options }, lastRuntimeEvent: `t3-import.sync.${plan.thread.source}`, lastRuntimeEventAt: plan.thread.updatedAt }));
           }
@@ -732,18 +817,27 @@ export async function syncConversations(selections: SyncSelection[], paths: Targ
             isCanonical: true,
           });
         }
-      })();
+      };
+      if (v2Written) collectRecords();
+      else db.transaction(collectRecords)();
       assets.cleanup();
     } catch (error) {
-      for (const path of assets.created) rmSync(path, { force: true });
+      if (!v2Committed) for (const path of assets.created) rmSync(path, { force: true });
       assets.cleanup();
       throw error;
     }
-    if (ledgerRecords.length) recordImports(ledgerRecords);
+    if (ledgerRecords.length) {
+      try { recordImports(ledgerRecords); }
+      catch (error) {
+        if (!v2Committed) throw error;
+        warnings.push(`V2 synchronization committed, but the external ledger could not be updated: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
     const integrity = String(db.pragma("integrity_check", { simple: true }));
     if (integrity !== "ok") throw writeError(`Post-sync integrity check failed: ${integrity}`);
     return { schemaVersion: 1, status: aggregate(plans.map((plan) => plan.result), false), target: paths.dbPath, migration: schema.migration, backup, results: plans.map((plan) => plan.result), warnings, hasConflicts: plans.some((plan) => hasConflict(plan.result.status)) };
   } catch (error) {
+    if (v2Committed) throw writeError(`V2 synchronization committed, but post-write verification or bookkeeping failed: ${error instanceof Error ? error.message : String(error)}. Attachments were retained. Inspect the target and recover the external ledger before further writes.`, error);
     if (error instanceof Error && error.name === "ImporterError") throw error;
     throw writeError(`Synchronization failed: ${error instanceof Error ? error.message : String(error)}`, error);
   } finally {

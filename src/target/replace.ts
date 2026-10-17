@@ -16,7 +16,8 @@ import { deterministicUuid, isObject, stringValue } from "../core/util.js";
 import { safetyError, writeError } from "../core/errors.js";
 import type { TargetOverrides } from "./config.js";
 import { listImports, recordConsolidation, type LedgerRecord, type StoredLedgerRecord } from "./ledger.js";
-import { assertT3Closed, validateTargetDatabase } from "./schema.js";
+import { assertT3Closed, isV2Database, validateTargetDatabase } from "./schema.js";
+import { assertV2ThreadSettled, prepareV2Write, v2SourceConflict, v2Thread } from "./v2.js";
 import { threadWorkingDirectory } from "./destination.js";
 import {
   IMPORTER_VERSION,
@@ -85,6 +86,7 @@ function runtimeRow(db: Database.Database, threadId: string): RuntimeRow | undef
 }
 
 function isDeleted(db: Database.Database, threadId: string, events: ReturnType<typeof readEvents>): boolean {
+  if (isV2Database(db) && v2Thread(db, threadId)?.deletedAt) return true;
   if (events.some((row) => row.type === "thread.deleted")) return true;
   const table = db.prepare("SELECT 1 found FROM sqlite_master WHERE type='table' AND name='projection_threads'").get();
   if (!table) return false;
@@ -155,6 +157,11 @@ function buildPlan(db: Database.Database, paths: TargetPaths, conversation: Cano
     return { conversation, thread, result: item(thread, match.stale ? "target-missing" : "not-imported", match.stale ? "The canonical ledger entry is stale because its T3 task is missing." : "Conversation has not been imported into this T3 database.") };
   }
   const record = match.record;
+  if (isV2Database(db)) {
+    assertV2ThreadSettled(db, record.threadId);
+    const conflict = v2SourceConflict(db, record.threadId, thread);
+    if (conflict) throw safetyError(conflict);
+  }
   const oldRecords = canonicalSessionRecords(db, paths, thread, record);
   const oldEvents = readEvents(db, record.threadId);
   if (!createEvent(oldEvents) || isDeleted(db, record.threadId, oldEvents)) {
@@ -190,6 +197,11 @@ function buildPlan(db: Database.Database, paths: TargetPaths, conversation: Cano
   const workspace = threadWorkingDirectory(db, record.threadId, thread.workspace);
   const created = planned.events.find((entry) => entry.type === "thread.created");
   if (created) created.payload.worktreePath = workspace.worktreePath;
+  if (created && isV2Database(db)) {
+    const previous = v2Thread(db, record.threadId);
+    created.payload.runtimeMode = previous?.runtimeMode ?? "full-access";
+    created.payload.interactionMode = previous?.interactionMode ?? "default";
+  }
   const deletedAt = new Date().toISOString();
   const deletions = oldRecords.flatMap((oldRecord, index) => {
     const events = oldRecord.threadId === record.threadId ? oldEvents : readEvents(db, oldRecord.threadId);
@@ -243,15 +255,19 @@ export async function replaceConversations(selections: ReplaceSelection[], paths
   const releaseLock = options.dryRun ? () => {} : acquireLock(paths);
   const db = new Database(paths.dbPath, { readonly: options.dryRun, fileMustExist: true });
   let backup: string | null = null;
+  let v2Committed = false;
   const warnings: string[] = [];
   try {
     const schema = validateTargetDatabase(db);
     const plans = selections.map((selection) => buildPlan(db, paths, selection.conversation, options.dryRun));
     const writable = plans.filter((plan) => plan.planned && plan.deletions?.length && plan.oldRecord && plan.oldRecords?.length);
+    const v2Plans = isV2Database(db) ? writable.flatMap((plan) => [plan.planned!, ...plan.deletions!.map((deletion) => ({ ...plan.planned!, threadId: deletion.record.threadId, events: [deletion.event], resumable: false }))]) : [];
+    const v2Write = v2Plans.length ? await prepareV2Write(db, v2Plans) : undefined;
+    if (v2Write) for (const plan of writable) plan.result.events = plan.planned!.targetEventCount! + plan.deletions!.length;
     if (writable.length > 0) {
       const backlog = projectionBacklog(db);
       if (backlog.backlog > 0) throw safetyError(`T3 has ${backlog.backlog} unprojected event${backlog.backlog === 1 ? "" : "s"}. Open T3 and let it finish loading before replacing conversations.`);
-      const count = writable.reduce((sum, plan) => sum + plan.planned!.events.length + plan.deletions!.length, 0);
+      const count = writable.reduce((sum, plan) => sum + (plan.planned!.targetEventCount ?? plan.planned!.events.length) + plan.deletions!.length, 0);
       if (count > MAX_SAFE_IMPORT_EVENTS) throw safetyError(`Replacement would append ${count} events, exceeding the safe one-launch limit of ${MAX_SAFE_IMPORT_EVENTS}. Replace fewer conversations at a time.`);
     }
     if (options.dryRun || writable.length === 0) {
@@ -264,6 +280,8 @@ export async function replaceConversations(selections: ReplaceSelection[], paths
     const assets = materializeAssets(writable.map((plan) => plan.planned!), paths, randomUUID());
     const ledgerUpdates: Array<{ old: StoredLedgerRecord[]; next: LedgerRecord }> = [];
     try {
+      const v2Written = v2Write ? await v2Write.write() : undefined;
+      v2Committed = Boolean(v2Written);
       const nextVersion = db.prepare("SELECT COALESCE(MAX(stream_version), -1) + 1 nextVersion FROM orchestration_events WHERE aggregate_kind = ? AND stream_id = ?");
       const insert = db.prepare(`INSERT INTO orchestration_events (event_id, aggregate_kind, stream_id, stream_version, event_type, occurred_at, command_id, causation_event_id, correlation_id, actor_kind, payload_json, metadata_json) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?)`);
       const deleteRuntime = db.prepare("DELETE FROM provider_session_runtime WHERE thread_id = ?");
@@ -272,7 +290,7 @@ export async function replaceConversations(selections: ReplaceSelection[], paths
         VALUES (?, ?, ?, ?, ?, 'stopped', ?, ?, ?)
         ON CONFLICT(thread_id) DO UPDATE SET provider_name=excluded.provider_name, provider_instance_id=excluded.provider_instance_id, adapter_key=excluded.adapter_key, runtime_mode=excluded.runtime_mode, status='stopped', last_seen_at=excluded.last_seen_at, resume_cursor_json=excluded.resume_cursor_json, runtime_payload_json=excluded.runtime_payload_json
       `);
-      db.exec("BEGIN IMMEDIATE");
+      if (!v2Written) db.exec("BEGIN IMMEDIATE");
       try {
         for (const plan of writable) {
           const planned = plan.planned!;
@@ -280,13 +298,18 @@ export async function replaceConversations(selections: ReplaceSelection[], paths
           const oldRecords = plan.oldRecords!;
           let first = Number.MAX_SAFE_INTEGER;
           let last = 0;
-          let newVersion = (nextVersion.get("thread", planned.threadId) as { nextVersion: number }).nextVersion;
-          for (const row of planned.events) {
+          if (v2Written) {
+            const sequences = [...v2Written].filter(([candidate]) => candidate === planned || plan.deletions!.some((deletion) => deletion.record.threadId === candidate.threadId)).map(([, sequence]) => sequence);
+            first = Math.min(...sequences.map((sequence) => sequence.first));
+            last = Math.max(...sequences.map((sequence) => sequence.last));
+          }
+          let newVersion = v2Written ? 0 : (nextVersion.get("thread", planned.threadId) as { nextVersion: number }).nextVersion;
+          for (const row of v2Written ? [] : planned.events) {
             const inserted = insert.run(row.eventId, row.aggregateKind, row.streamId, newVersion++, row.type, row.occurredAt, row.actorKind, JSON.stringify(row.payload), JSON.stringify(row.metadata));
             const sequence = Number(inserted.lastInsertRowid);
             first = Math.min(first, sequence); last = Math.max(last, sequence);
           }
-          for (const deletion of plan.deletions!) {
+          for (const deletion of v2Written ? [] : plan.deletions!) {
             const row = deletion.event;
             const oldVersion = (nextVersion.get("thread", deletion.record.threadId) as { nextVersion: number }).nextVersion;
             const deleted = insert.run(row.eventId, row.aggregateKind, row.streamId, oldVersion, row.type, row.occurredAt, row.actorKind, JSON.stringify(row.payload), JSON.stringify(row.metadata));
@@ -294,7 +317,7 @@ export async function replaceConversations(selections: ReplaceSelection[], paths
             first = Math.min(first, deleteSequence); last = Math.max(last, deleteSequence);
           }
 
-          if (plan.result.resumeTransferred) {
+          if (!v2Written && plan.result.resumeTransferred) {
             const runtime = plan.runtime;
             let cursor: Record<string, unknown> | undefined;
             try { cursor = runtime?.resumeCursorJson ? JSON.parse(runtime.resumeCursorJson) as Record<string, unknown> : planned.thread.resumeCursor; } catch { cursor = planned.thread.resumeCursor; }
@@ -307,7 +330,7 @@ export async function replaceConversations(selections: ReplaceSelection[], paths
               runtime?.runtimePayloadJson ?? JSON.stringify({ cwd: planned.thread.workspace, model: planned.provider.model, activeTurnId: null, lastError: null, modelSelection: modelSelection(planned.provider), lastRuntimeEvent: `t3-import.replace.${planned.thread.source}`, lastRuntimeEventAt: planned.thread.updatedAt }),
             );
           }
-          for (const oldRecord of oldRecords) deleteRuntime.run(oldRecord.threadId);
+          if (!v2Written) for (const oldRecord of oldRecords) deleteRuntime.run(oldRecord.threadId);
           plan.result.sequence = { first, last };
           const replacedAt = new Date().toISOString();
           ledgerUpdates.push({ old: oldRecords, next: {
@@ -322,14 +345,14 @@ export async function replaceConversations(selections: ReplaceSelection[], paths
             isCanonical: true, replacedAt,
           } });
         }
-        db.exec("COMMIT");
+        if (!v2Written) db.exec("COMMIT");
       } catch (error) {
-        db.exec("ROLLBACK");
+        if (!v2Written) db.exec("ROLLBACK");
         throw error;
       }
       assets.cleanup();
     } catch (error) {
-      for (const path of assets.created) rmSync(path, { force: true });
+      if (!v2Committed) for (const path of assets.created) rmSync(path, { force: true });
       assets.cleanup();
       throw error;
     }
@@ -342,6 +365,7 @@ export async function replaceConversations(selections: ReplaceSelection[], paths
     const results = plans.map((plan) => plan.result);
     return { schemaVersion: 1, status: aggregate(results, false), target: paths.dbPath, migration: schema.migration, backup, results, warnings, hasConflicts: results.some((result) => conflictStatuses.has(result.status)) };
   } catch (error) {
+    if (v2Committed) throw writeError(`V2 replacement committed, but post-write verification or bookkeeping failed: ${error instanceof Error ? error.message : String(error)}. Attachments were retained. Inspect the replacement and recover the external ledger before further writes; do not repeat replacement blindly.`, error);
     if (error instanceof Error && error.name === "ImporterError") throw error;
     throw writeError(`Replacement failed: ${error instanceof Error ? error.message : String(error)}`, error);
   } finally {
