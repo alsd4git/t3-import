@@ -1,5 +1,9 @@
 # Fork assessment, 21 October 2026
 
+Historical assessment before implementation. The user subsequently clarified
+that synchronization is only provider-to-T3; reverse transfer is outside scope.
+See [the implementation validation](v011-opencode-validation.md) for current support.
+
 This assessment covers T3 0.1.1, OpenCode, interactive destination selection,
 and integration with the personal `codex-thread-normalizer` skill. Work remains
 local on `feat/t3-v010-v2-support`. No live metadata was changed and no provider
