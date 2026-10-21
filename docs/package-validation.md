@@ -16,7 +16,8 @@ import ledger live only under that temporary directory and are removed at exit.
 No live `.t3`, Codex, Claude Code, or OpenCode data is accessed.
 
 CI runs this check on Windows, macOS, and Ubuntu with Node.js 22 and 24. It also
-runs typecheck and the full test suite in each matrix job. Run the package check
+runs typecheck and the full test suite in each matrix job. The CI workflow also
+accepts manual dispatch for a chosen branch. Run the package check
 locally with a supported Node.js release:
 
 ```sh
