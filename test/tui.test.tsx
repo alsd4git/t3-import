@@ -1,13 +1,15 @@
 import React from "react";
+import Database from "better-sqlite3";
 import { render } from "ink-testing-library";
 import { describe, expect, it } from "vitest";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { conversationStatusText, escapeDestination, helpTextForScreen, ImportTui, replacementStatusText, ReplacementReview, selectionMarker, StartT3Prompt } from "../src/tui.js";
+import { conversationStatusText, discoverTuiDestinations, escapeDestination, helpTextForScreen, ImportTui, replacementStatusText, ReplacementReview, selectionMarker, sourceLabel, StartT3Prompt } from "../src/tui.js";
 import type { ConversationReplacePreview, ConversationSyncPreview, TargetPaths } from "../src/core/types.js";
-import { canonicalConversation } from "./helpers.js";
+import { sourceNames } from "../src/core/providers.js";
+import { canonicalConversation, createTarget } from "./helpers.js";
 
 const paths: TargetPaths = {
   t3Home: "C:\\fixture\\.t3",
@@ -50,6 +52,7 @@ describe("interactive TUI", () => {
     expect(helpTextForScreen("source")).toBe("↑/↓ or j/k move  Enter choose  Esc back/quit  q quit");
     expect(helpTextForScreen("workspace")).not.toContain("Space select");
     expect(helpTextForScreen("provider")).not.toContain("/ search");
+    expect(helpTextForScreen("destination")).toContain("Enter choose");
     expect(helpTextForScreen("threads")).toContain("Space select  a all  / search");
     expect(helpTextForScreen("threads", true)).toBe("Type to search  Backspace delete  Enter apply  Esc cancel");
     expect(helpTextForScreen("review")).toBe("Enter confirm  Esc back  q quit");
@@ -134,18 +137,50 @@ describe("interactive TUI", () => {
 
   it("supports arrow and vim-style source navigation", async () => {
     const tui = render(<ImportTui paths={paths} />);
-    const initialFrame = await waitForFrame(tui, "›  Codex");
+    const initialFrame = await waitForFrame(tui, `›  ${sourceLabel(sourceNames[0]!)}`);
     expect(initialFrame).toContain("Choose a source");
     expect(initialFrame).toContain("Enter choose");
     expect(initialFrame).not.toContain("Space select");
     expect(initialFrame).not.toContain("/ search");
 
-    tui.stdin.write("j");
-    await waitForFrame(tui, "›  Claude Code");
-
-    tui.stdin.write("k");
-    await waitForFrame(tui, "›  Codex");
+    for (let index = 1; index < sourceNames.length; index += 1) {
+      tui.stdin.write("j");
+      await waitForFrame(tui, `›  ${sourceLabel(sourceNames[index]!)}`);
+    }
+    for (let index = sourceNames.length - 2; index >= 0; index -= 1) {
+      tui.stdin.write("k");
+      await waitForFrame(tui, `›  ${sourceLabel(sourceNames[index]!)}`);
+    }
     tui.unmount();
+  });
+
+  it("offers only same-cwd projects plus No project when canonical policy allows it", async () => {
+    const root = await mkdtemp(join(tmpdir(), "t3-import-tui-destination-"));
+    try {
+      const target = createTarget(join(root, "t3"), 62);
+      const workspace = join(root, "workspace");
+      mkdirSync(workspace, { recursive: true });
+      const otherWorkspace = join(root, "other");
+      mkdirSync(otherWorkspace, { recursive: true });
+      const db = new Database(target.dbPath);
+      try {
+        const insert = db.prepare(`INSERT INTO projection_projects (project_id,title,workspace_root,scripts_json,created_at,updated_at)
+          VALUES (?,?,?,'[]','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')`);
+        insert.run("matching", "Matching project", workspace);
+        insert.run("different", "Different project", otherWorkspace);
+      } finally { db.close(); }
+
+      expect(discoverTuiDestinations(target, workspace)).toEqual([
+        { label: "Use the matching workspace project (default)" },
+        { label: `Matching project · ${workspace}`, options: { targetProject: "matching" } },
+      ]);
+
+      const scratchWorkspace = join(target.t3Home, "scratch", "task");
+      mkdirSync(scratchWorkspace, { recursive: true });
+      expect(discoverTuiDestinations(target, scratchWorkspace).at(-1)).toEqual({
+        label: "No project (T3 scratch)", options: { noProject: true },
+      });
+    } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
   it("blocks at startup while the target T3 runtime is live", async () => {
