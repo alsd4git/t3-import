@@ -4,8 +4,9 @@ import { basename, join } from "node:path";
 import type { TargetPaths } from "../core/types.js";
 import { compatibilityError, safetyError } from "../core/errors.js";
 import { isObject, stringValue } from "../core/util.js";
+import { v2Profiles, v2Migrations } from "./v2Profiles.js";
 
-export const SUPPORTED_MIGRATIONS = [40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 62] as const;
+export const SUPPORTED_MIGRATIONS = [40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, ...Object.keys(v2Profiles).map(Number)];
 
 export function isV2Database(db: Database.Database): boolean {
   return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='orchestration_v2_projection_threads'").get());
@@ -15,7 +16,7 @@ export function isV2Database(db: Database.Database): boolean {
 export function targetMigration(db: Database.Database): number {
   const row = db.prepare("SELECT COALESCE(MAX(migration_id), 0) migration FROM effect_sql_migrations").get() as { migration: number };
   if (!SUPPORTED_MIGRATIONS.some((migration) => migration === row.migration)) {
-    throw compatibilityError(`Unsupported T3 schema migration ${row.migration}; supported migrations are 40–54 (V1) and 62 (T3 0.1.0 V2).`);
+    throw compatibilityError(`Unsupported T3 schema migration ${row.migration}; supported migrations are 40–54 (V1), 62 (T3 0.1.0 V2), and 67 (T3 0.1.1 V2).`);
   }
   return row.migration;
 }
@@ -86,17 +87,19 @@ export function validateTargetDatabase(db: Database.Database): SchemaInfo {
   // migration before checking the older profile's columns and tables.
   if (!names.has("effect_sql_migrations")) throw compatibilityError("Not a compatible T3 database: missing migrations table.");
   const migration = targetMigration(db);
+  const profile = v2Profiles[migration];
   for (const [table, columns] of Object.entries(REQUIRED_COLUMNS)) {
+    if (profile && table === "projection_state") continue;
     if (!names.has(table)) throw compatibilityError(`Not a compatible T3 database: missing table '${table}'.`);
     const available = new Set((db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((entry) => entry.name));
     for (const column of columns) if (!available.has(column)) throw compatibilityError(`Unsupported T3 schema: ${table}.${column} is missing.`);
   }
-  if (isV2Database(db) !== (migration === 62)) throw compatibilityError("T3 database schema and migration disagree about the orchestrator version.");
-  if (migration === 62) {
-    const expected = new Map([[55, "OrchestrationV2"], [56, "RemoveRedundantProjectionIndexes"], [57, "ScheduledTaskWebhooks"], [58, "WebhookRelayDeliveries"], [59, "McpAppModelContext"], [60, "ThreadSnapshotWindowIndexes"], [61, "PullRequestReviewGuides"], [62, "ThreadFailureLookupIndex"]]);
+  if (isV2Database(db) !== Boolean(profile)) throw compatibilityError("T3 database schema and migration disagree about the orchestrator version.");
+  if (profile) {
+    const expected = new Map([...v2Migrations].filter(([id]) => id <= migration));
     const recorded = db.prepare("SELECT migration_id id, name FROM effect_sql_migrations WHERE migration_id >= 55").all() as Array<{ id: number; name: string }>;
-    if (recorded.length !== expected.size || recorded.some((row) => expected.get(row.id) !== row.name)) throw compatibilityError("T3 V2 migration history does not match the pinned 0.1.0 release.");
-    const required = JSON.parse(readFileSync(new URL("../../vendor/t3-v010/schema-columns.json", import.meta.url), "utf8")) as Record<string, string[]>;
+    if (recorded.length !== expected.size || recorded.some((row) => expected.get(row.id) !== row.name)) throw compatibilityError(`T3 V2 migration history does not match the pinned ${profile.release} release.`);
+    const required = JSON.parse(readFileSync(new URL(`../../vendor/${profile.directory}/schema-columns.json`, import.meta.url), "utf8")) as Record<string, string[]>;
     for (const [table, columns] of Object.entries(required)) {
       const available = new Set((db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((row) => row.name));
       for (const column of columns) if (!available.has(column)) throw compatibilityError(`Unsupported T3 V2 schema: ${table}.${column} is missing.`);

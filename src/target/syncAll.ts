@@ -1,5 +1,6 @@
 import Database from "better-sqlite3";
-import type { SourceAdapter, SyncItemResult, SyncRunResult, TargetPaths } from "../core/types.js";
+import type { SourceAdapter, SourceName, SyncItemResult, SyncRunResult, TargetPaths } from "../core/types.js";
+import { sourceDriver } from "../core/providers.js";
 import { isObject, stringValue } from "../core/util.js";
 import { safetyError, usageError } from "../core/errors.js";
 import { listImports } from "./ledger.js";
@@ -14,7 +15,7 @@ interface LinkedThread {
 }
 
 /** Discover by persisted provider identity, across projects and scratch cwd's. */
-function linkedCodexThreads(paths: TargetPaths): LinkedThread[] {
+function linkedProviderThreads(paths: TargetPaths, source: SourceName): LinkedThread[] {
   const db = new Database(paths.dbPath, { readonly: true, fileMustExist: true });
   try {
     validateTargetDatabase(db);
@@ -28,14 +29,14 @@ function linkedCodexThreads(paths: TargetPaths): LinkedThread[] {
       linked.set(sourceId, { sourceId, threadId, title: currentTitle(db, threadId, events) });
     };
     if (isV2Database(db)) for (const row of v2ProviderThreads(db)) {
-      if (row.driver === "codex" && typeof row.appThreadId === "string" && isObject(row.nativeThreadRef) && row.nativeThreadRef.driver === "codex" && row.nativeThreadRef.strength === "strong") {
+      if (row.driver === sourceDriver(source) && typeof row.appThreadId === "string" && isObject(row.nativeThreadRef) && row.nativeThreadRef.driver === sourceDriver(source) && row.nativeThreadRef.strength === "strong") {
         const id = stringValue(row.nativeThreadRef.nativeId);
         if (id) add(id, row.appThreadId);
       }
     }
     const rows = db.prepare(`SELECT thread_id threadId, resume_cursor_json cursor
       FROM provider_session_runtime WHERE provider_name='codex' AND adapter_key='codex'`).all() as Array<{ threadId: string; cursor: string | null }>;
-    for (const row of rows) {
+    for (const row of source === "codex" && !isV2Database(db) ? rows : []) {
       let sourceId: string | undefined;
       try {
         const cursor: unknown = row.cursor ? JSON.parse(row.cursor) : undefined;
@@ -43,7 +44,7 @@ function linkedCodexThreads(paths: TargetPaths): LinkedThread[] {
       } catch { /* malformed bindings are not guessed from titles or paths */ }
       if (sourceId) add(sourceId, row.threadId);
     }
-    for (const record of listImports(targetId(paths), "codex")) {
+    for (const record of listImports(targetId(paths), source)) {
       if (record.isCanonical !== false && validRecord(db, record) && !linked.has(record.sourceSessionId)) {
         add(record.sourceSessionId, record.threadId);
       }
@@ -56,18 +57,18 @@ function linkedCodexThreads(paths: TargetPaths): LinkedThread[] {
 export async function syncAllLinkedConversations(
   adapter: SourceAdapter, paths: TargetPaths, options: SyncOptions,
 ): Promise<SyncRunResult> {
-  if (adapter.name !== "codex") throw usageError("Synchronization across all workspaces currently supports --source codex only.");
-  const links = linkedCodexThreads(paths);
+  if (adapter.name === "claude") throw usageError("Synchronization across all workspaces currently supports --source codex or opencode.");
+  const links = linkedProviderThreads(paths, adapter.name);
   const summaries = new Map((await adapter.discover({})).map((summary) => [summary.id, summary]));
   const unavailable: SyncItemResult[] = [];
   const loaded = await Promise.all(links.map(async (link) => {
     const summary = summaries.get(link.sourceId);
     try {
-      if (!summary) throw new Error("The linked Codex rollout is unavailable locally or is excluded from source discovery.");
+      if (!summary) throw new Error("The linked provider conversation is unavailable locally or is excluded from source discovery.");
       return { conversation: await adapter.load(summary, {}) };
     } catch (error) {
       unavailable.push({
-        source: "codex", sourceId: link.sourceId, sourceKey: `codex:${link.sourceId}`,
+        source: adapter.name, sourceId: link.sourceId, sourceKey: `${adapter.name}:${link.sourceId}`,
         status: "not-imported", threadId: link.threadId, title: link.title,
         turnsAdded: 0, turnsAdopted: 0, events: 0, attachments: 0,
         titleAction: "unchanged", resumable: false,

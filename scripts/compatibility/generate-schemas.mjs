@@ -25,4 +25,5 @@ for (const ref of refs) {
 }
 mkdirSync(join(root, "test/fixtures"), { recursive: true });
 schemas[62] = await generateV2Schema();
+schemas[67] = await generateV2Schema("0.1.1");
 writeFileSync(join(root, "test/fixtures/t3-schemas.json"), JSON.stringify(schemas, null, 2) + "\n");

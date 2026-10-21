@@ -25,13 +25,14 @@ import type {
 } from "../core/types.js";
 import { canonicalPath, deterministicUuid, isObject, sha256, truncate } from "../core/util.js";
 import { checkpointForThread } from "../core/checkpoint.js";
+import { sourceDriver } from "../core/providers.js";
 import { safetyError, writeError } from "../core/errors.js";
 import { resolveProviderSelection, type TargetOverrides } from "./config.js";
 import { assertT3Closed, validateTargetDatabase } from "./schema.js";
 import { recordImports, type LedgerRecord } from "./ledger.js";
 import { importDestination, threadWorkingDirectory, validateDestinationOptions, type DestinationOptions } from "./destination.js";
 import { isV2Database } from "./schema.js";
-import { prepareV2Write, v2ProviderThreads } from "./v2.js";
+import { prepareV2Write, v2ProviderThreads, v2Thread } from "./v2.js";
 import type { ImportCheckpoint } from "../core/checkpoint.js";
 
 const EVENT_TYPES = [
@@ -457,13 +458,14 @@ export async function importConversations(
     for (const selection of selections) {
       for (const sourceThread of selection.conversation.threads) {
         const thread = compactThreadForImport(sourceThread);
+        if (thread.source === "opencode" && !isV2Database(db)) throw safetyError("OpenCode imports require T3 Orchestrator V2.");
         if (thread.turns.length === 0) throw writeError(`Conversation ${thread.sourceSessionId} has no terminal turns to import. Use --include-incomplete to import an active snapshot as interrupted history.`);
         const threadId = thread.source === "codex" && /^[0-9a-f-]{36}$/iu.test(thread.sourceSessionId)
           ? thread.sourceSessionId
           : deterministicUuid(`t3-import:thread:${thread.sourceKey}`);
         const imported = isImported(db, thread.sourceKey, thread, threadId);
         if (isV2Database(db) && !imported) {
-          const linked = v2ProviderThreads(db).filter((row) => isObject(row.nativeThreadRef) && row.nativeThreadRef.driver === (thread.source === "codex" ? "codex" : "claudeAgent") && row.nativeThreadRef.nativeId === thread.sourceSessionId);
+          const linked = v2ProviderThreads(db).filter((row) => isObject(row.nativeThreadRef) && row.nativeThreadRef.driver === sourceDriver(thread.source) && row.nativeThreadRef.nativeId === thread.sourceSessionId && typeof row.appThreadId === "string" && !v2Thread(db, row.appThreadId)?.deletedAt);
           if (linked.length) throw safetyError("This source session is already linked to a V2 thread. Inspect synchronization instead of creating a duplicate import.");
         }
         const destination = importDestination(db, paths, thread.workspace, options);
@@ -481,7 +483,7 @@ export async function importConversations(
         }
         if (!projectId) projectId = deterministicUuid(`t3-import:project:${workspaceKey}`);
         projectIds.set(workspaceKey, projectId);
-        const provider = resolveProviderSelection(paths, thread.source, thread.model, thread.effort, options.providerInstance);
+        const provider = resolveProviderSelection(paths, thread.source, thread.model, thread.effort, options.providerInstance, thread.modelOptions);
         const seed = thread.sourceKey;
         const needsProject = destination ? destination.createProject : !existingProjectId(db, thread.workspace);
         const projectEvent = !imported && needsProject && !plannedProjectEvents.has(projectId)
