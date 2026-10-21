@@ -1,7 +1,7 @@
 import React from "react";
 import Database from "better-sqlite3";
 import { render } from "ink-testing-library";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { mkdtemp } from "node:fs/promises";
@@ -10,6 +10,7 @@ import { conversationStatusText, discoverTuiDestinations, escapeDestination, hel
 import type { ConversationReplacePreview, ConversationSyncPreview, TargetPaths } from "../src/core/types.js";
 import { sourceNames } from "../src/core/providers.js";
 import { canonicalConversation, createTarget } from "./helpers.js";
+import { sourceAdapter } from "../src/sources/index.js";
 
 const paths: TargetPaths = {
   t3Home: "C:\\fixture\\.t3",
@@ -152,6 +153,50 @@ describe("interactive TUI", () => {
       await waitForFrame(tui, `›  ${sourceLabel(sourceNames[index]!)}`);
     }
     tui.unmount();
+  });
+
+  it("keeps every Codex workspace selectable even when the cwd matches one", async () => {
+    const root = await mkdtemp(join(tmpdir(), "t3-import-tui-workspaces-"));
+    const target = createTarget(join(root, "t3"), 67);
+    const first = canonicalConversation(process.cwd()).summary;
+    const second = { ...first, id: "other-source", workspace: join(root, "another-project") };
+    const adapter = sourceAdapter("codex");
+    const discover = vi.spyOn(adapter, "discover").mockResolvedValue([first, second]);
+    const load = vi.spyOn(adapter, "load").mockImplementation(async (summary) => canonicalConversation(summary.workspace));
+    const tui = render(<ImportTui paths={target} initialSource="codex" />);
+    try {
+      const chooser = await waitForFrame(tui, second.workspace);
+      expect(chooser).toContain("Choose a workspace");
+      expect(chooser).toContain(first.workspace);
+      expect(chooser).not.toContain("Select conversations");
+      tui.stdin.write("\r");
+      await waitForFrame(tui, "Select conversations");
+      tui.stdin.write("\u001b");
+      await waitForFrame(tui, "Choose a workspace");
+    } finally {
+      tui.unmount();
+      discover.mockRestore(); load.mockRestore();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("honors an explicitly selected workspace without showing the chooser", async () => {
+    const root = await mkdtemp(join(tmpdir(), "t3-import-tui-explicit-workspace-"));
+    const target = createTarget(join(root, "t3"), 67);
+    const summary = canonicalConversation(root).summary;
+    const adapter = sourceAdapter("codex");
+    const discover = vi.spyOn(adapter, "discover").mockResolvedValue([summary]);
+    const load = vi.spyOn(adapter, "load").mockResolvedValue(canonicalConversation(root));
+    const tui = render(<ImportTui paths={target} initialSource="codex" initialWorkspace={root} />);
+    try {
+      const frame = await waitForFrame(tui, "Select conversations");
+      expect(frame).toContain(root);
+      expect(frame).not.toContain("Choose a workspace");
+    } finally {
+      tui.unmount();
+      discover.mockRestore(); load.mockRestore();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("offers only same-cwd projects plus No project when canonical policy allows it", async () => {

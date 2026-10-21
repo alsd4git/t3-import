@@ -16,7 +16,6 @@ import type {
   TargetPaths,
 } from "./core/types.js";
 import { sourceAdapter } from "./sources/index.js";
-import { inferCurrentWorkspace } from "./sources/codex.js";
 import { compactThreadForImport, importConversations } from "./target/importer.js";
 import { inspectConversationSync, syncConversations } from "./target/sync.js";
 import { listProviderInstances } from "./target/config.js";
@@ -302,20 +301,22 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
 
   useEffect(() => {
     if (screen !== "workspace") return;
+    let cancelled = false;
     setIndex(0);
     sourceAdapter(source).discover({}).then((items) => {
+      if (cancelled) return;
       setSummaries(items);
       const selectedWorkspace = initialWorkspace
         ? items.find((item) => item.workspace.toLowerCase() === initialWorkspace.toLowerCase())?.workspace
-        : inferCurrentWorkspace(items);
+        : undefined;
       if (selectedWorkspace) {
         setWorkspace(selectedWorkspace);
         setProvider(initialProvider ?? providers[0]);
-        // Workspace inference bypasses the workspace option screen, so it is
-        // deliberately not added to navigation history.
+        // An explicit --workspace bypasses the chooser and its navigation history.
         setScreen("threads");
       }
-    }).catch((cause) => { setError(cause instanceof Error ? cause.message : String(cause)); setScreen("error"); });
+    }).catch((cause) => { if (!cancelled) { setError(cause instanceof Error ? cause.message : String(cause)); setScreen("error"); } });
+    return () => { cancelled = true; };
   }, [screen, source]);
 
   useEffect(() => {

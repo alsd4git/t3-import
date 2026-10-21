@@ -58,6 +58,10 @@ t3-import
 
 Running without a command opens the interactive TUI. It guides you through source, workspace, provider instance, conversation selection, review, confirmation, and results, then offers to start T3 Code with Yes selected by default.
 
+Without an explicit `--workspace`, the TUI shows all discovered working folders.
+It does not filter to the current directory or an ancestor of the checkout.
+Pass `--workspace <path>` to open that folder's conversation list directly.
+
 For non-interactive `import`, `--workspace` is required and filters source discovery. By default, the destination project is determined by the selected conversation's recorded workspace: the importer reuses a matching T3 project or creates one named after that directory. It does not clone or move the source repository. Omitting `--workspace` does not select T3's "No project" area.
 
 To choose a destination explicitly, pass `--target-project <project-id>` for an existing, non-deleted T3 project. Its root must match the source cwd; otherwise the importer refuses rather than silently changing where resumed work runs. Project IDs can be inspected in the target database with a read-only query such as `SELECT project_id, title, workspace_root FROM projection_projects WHERE deleted_at IS NULL`.
