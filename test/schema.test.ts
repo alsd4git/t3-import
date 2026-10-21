@@ -86,6 +86,21 @@ it.each([39, 55])("rejects unsupported migration %i without writes", async (migr
   expect(existsSync(paths.attachmentsDir)).toBe(false);
 });
 
+it("reports an unsupported V2 migration before checking removed legacy tables", () => {
+  const paths = createTarget(join(root, "t3"), 62);
+  const fixture = new Database(paths.dbPath);
+  // Model the relevant 0.1.1 change without pretending this is its full schema.
+  fixture.exec("DROP TABLE projection_state; UPDATE effect_sql_migrations SET migration_id=67 WHERE migration_id=62");
+  fixture.close();
+  const before = readFileSync(paths.dbPath);
+  const db = new Database(paths.dbPath, { readonly: true });
+  try {
+    expect(() => validateTargetDatabase(db)).toThrowError("Unsupported T3 schema migration 67");
+  } finally { db.close(); }
+  expect(readFileSync(paths.dbPath)).toEqual(before);
+  expect(existsSync(join(root, "ledger"))).toBe(false);
+});
+
 it("distinguishes a maintenance cursor from a real projection backlog", async () => {
   const paths = createTarget(join(root, "t3"), 50);
   await importConversations([{ conversation: canonicalConversation(root), resume: true }], paths, { dryRun: false, resume: true });

@@ -82,13 +82,15 @@ export function validateTargetDatabase(db: Database.Database): SchemaInfo {
   if (integrity !== "ok") throw compatibilityError(`T3 database integrity check failed: ${integrity}`);
   const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>;
   const names = new Set(tables.map((entry) => entry.name));
+  // New releases can intentionally remove legacy tables. Identify an unsupported
+  // migration before checking the older profile's columns and tables.
+  if (!names.has("effect_sql_migrations")) throw compatibilityError("Not a compatible T3 database: missing migrations table.");
+  const migration = targetMigration(db);
   for (const [table, columns] of Object.entries(REQUIRED_COLUMNS)) {
     if (!names.has(table)) throw compatibilityError(`Not a compatible T3 database: missing table '${table}'.`);
     const available = new Set((db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((entry) => entry.name));
     for (const column of columns) if (!available.has(column)) throw compatibilityError(`Unsupported T3 schema: ${table}.${column} is missing.`);
   }
-  if (!names.has("effect_sql_migrations")) throw compatibilityError("Not a compatible T3 database: missing migrations table.");
-  const migration = targetMigration(db);
   if (isV2Database(db) !== (migration === 62)) throw compatibilityError("T3 database schema and migration disagree about the orchestrator version.");
   if (migration === 62) {
     const expected = new Map([[55, "OrchestrationV2"], [56, "RemoveRedundantProjectionIndexes"], [57, "ScheduledTaskWebhooks"], [58, "WebhookRelayDeliveries"], [59, "McpAppModelContext"], [60, "ThreadSnapshotWindowIndexes"], [61, "PullRequestReviewGuides"], [62, "ThreadFailureLookupIndex"]]);
