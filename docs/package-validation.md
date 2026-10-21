@@ -15,6 +15,12 @@ keys and absence of queued provider effects. The database, source fixture, and
 import ledger live only under that temporary directory and are removed at exit.
 No live `.t3`, Codex, Claude Code, or OpenCode data is accessed.
 
+Database assertions run in a child process, which unloads the installed native
+SQLite addon before cleanup. This matters on Windows, where a loaded `.node`
+library cannot be deleted even after closing its database connection. Windows
+integration tests have a 20-second per-case budget for real SQLite backups and
+filesystem work; other platforms retain the five-second default.
+
 CI runs this check on Windows, macOS, and Ubuntu with Node.js 22 and 24. It also
 runs typecheck and the full test suite in each matrix job. The CI workflow also
 accepts manual dispatch for a chosen branch. Run the package check

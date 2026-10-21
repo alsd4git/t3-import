@@ -1,5 +1,4 @@
 import { spawnSync } from "node:child_process";
-import { createRequire } from "node:module";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -118,23 +117,11 @@ try {
   const repeatedOutput = run(process.execPath, [cli, ...cliArgs, "sync", "--source", "codex", "--workspace", workspace, "--thread", sessionId, "--yes", "--non-interactive", "--summary", "--json"], { env: commonEnv });
   if (JSON.parse(repeatedOutput).status !== "up-to-date") throw new Error(`Repeated packed CLI sync was not idempotent:\n${repeatedOutput}`);
 
-  const Database = createRequire(join(installedPackage, "package.json"))("better-sqlite3");
-  const database = new Database(stateDatabase, { readonly: true });
-  try {
-    const integrity = database.pragma("integrity_check", { simple: true });
-    if (integrity !== "ok") throw new Error(`Synthetic T3 database integrity check returned ${integrity}.`);
-    if (database.pragma("foreign_key_check").length) throw new Error("Synthetic T3 database has invalid foreign keys.");
-    const migration = database.prepare("SELECT MAX(migration_id) migration FROM effect_sql_migrations").get().migration;
-    if (migration !== 67) throw new Error(`Synthetic T3 database used migration ${migration}; expected 67.`);
-    const messageCount = database.prepare("SELECT COUNT(*) count FROM orchestration_v2_projection_messages").get().count;
-    if (messageCount !== 4) throw new Error(`Packed CLI import/sync produced ${messageCount} messages; expected 4.`);
-    const effects = database.prepare("SELECT COUNT(*) count FROM orchestration_v2_effect_outbox").get().count;
-    if (effects !== 0) throw new Error(`Packed historical import enqueued ${effects} provider effects.`);
-  } finally {
-    database.close();
-  }
+  // Windows cannot unlink a loaded native addon, even after its DB is closed.
+  // Let the verification process exit and unload the DLL before removing install/.
+  run(process.execPath, [fileURLToPath(new URL("./package-database-check.mjs", import.meta.url)), join(installedPackage, "package.json"), stateDatabase]);
 
   console.log(`Packed artifact ${metadata.name}@${metadata.version}: install, CLI help/version, and T3 0.1.1 import/sync passed.`);
 } finally {
-  await rm(temporaryRoot, { recursive: true, force: true });
+  await rm(temporaryRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
 }
