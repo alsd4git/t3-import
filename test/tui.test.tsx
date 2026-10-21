@@ -6,7 +6,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { conversationStatusText, discoverTuiDestinations, escapeDestination, helpTextForScreen, ImportTui, replacementStatusText, ReplacementReview, selectionMarker, sourceLabel, StartT3Prompt } from "../src/tui.js";
+import { ConversationStatusDetails, conversationStatusText, discoverTuiDestinations, escapeDestination, helpTextForScreen, ImportTui, replacementStatusText, ReplacementReview, selectionMarker, sourceLabel, StartT3Prompt } from "../src/tui.js";
 import type { ConversationReplacePreview, ConversationSyncPreview, TargetPaths } from "../src/core/types.js";
 import { sourceNames } from "../src/core/providers.js";
 import { canonicalConversation, createTarget } from "./helpers.js";
@@ -42,6 +42,51 @@ async function waitForFrame(
 }
 
 describe("interactive TUI", () => {
+  it("explains settled additions, active tails, conflicts and review actions", () => {
+    const preview: ConversationSyncPreview = {
+      sourceId: "fixture", status: "syncable", newTurns: 2, newCompletedTurns: 2,
+      newInterruptedTurns: 0, newFailedTurns: 0, ignoredActiveTurns: 1, adoptedTurns: 0,
+      titleChanged: false, selectable: true, previouslyImported: true, warnings: [],
+    };
+    const additions = render(<ConversationStatusDetails preview={preview} checking={false} review />);
+    expect(additions.lastFrame()).toContain("Will append 2 settled turn(s) after confirmation");
+    expect(additions.lastFrame()).toContain("unfinished source turn(s) excluded");
+    additions.unmount();
+    const conflict = render(<ConversationStatusDetails preview={{ ...preview, status: "history-diverged", warnings: ["Native turn content differs"] }} checking={false} mode="sync" />);
+    expect(conflict.lastFrame()).toContain("Conflict: inspect the differing histories");
+    expect(conflict.lastFrame()).toContain("Reason: Native turn content differs");
+    conflict.unmount();
+    const error = render(<ConversationStatusDetails checking={false} error="Unsupported source schema" />);
+    expect(error.lastFrame()).toContain("Unavailable: inspection failed");
+    expect(error.lastFrame()).toContain("Reason: Unsupported source schema");
+    error.unmount();
+  });
+
+  it("shows an inspection error without losing healthy rows or enabling the failed row", async () => {
+    const root = await mkdtemp(join(tmpdir(), "t3-import-tui-errors-"));
+    const target = createTarget(join(root, "t3"), 67);
+    const healthy = canonicalConversation(root);
+    const broken = { ...healthy.summary, id: "broken", title: "Broken source" };
+    const adapter = sourceAdapter("codex");
+    const discover = vi.spyOn(adapter, "discover").mockResolvedValue([broken, healthy.summary]);
+    const load = vi.spyOn(adapter, "load").mockImplementation(async (summary) => {
+      if (summary.id === broken.id) throw new Error("Unreadable transcript fixture");
+      return healthy;
+    });
+    const tui = render(<ImportTui paths={target} initialSource="codex" initialWorkspace={root} />);
+    try {
+      const frame = await waitForFrame(tui, "Reason: Unreadable transcript fixture");
+      expect(frame).toContain("⊘ Broken source");
+      expect(frame).toContain("Unavailable: 1");
+      tui.stdin.write("j");
+      await waitForFrame(tui, "Select to import a new conversation");
+      expect(tui.lastFrame()).toContain(healthy.summary.title);
+    } finally {
+      tui.unmount(); discover.mockRestore(); load.mockRestore();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("uses related circle symbols for selectable, selected, and disabled rows", () => {
     expect(selectionMarker(false, false)).toBe("○");
     expect(selectionMarker(true, false)).toBe("◉");

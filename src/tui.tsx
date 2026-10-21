@@ -190,6 +190,42 @@ export function replacementStatusText(preview: ConversationReplacePreview | unde
   return "target missing";
 }
 
+export function ConversationStatusDetails({ preview, replacement, checking, error, mode = "auto", review = false }: {
+  preview?: ConversationSyncPreview | undefined;
+  replacement?: ConversationReplacePreview | undefined;
+  checking: boolean;
+  error?: string | undefined;
+  mode?: "auto" | "sync" | "replace";
+  review?: boolean;
+}): React.JSX.Element {
+  let action: string;
+  if (error) action = "Unavailable: inspection failed. Resolve the error and reopen this workspace.";
+  else if (mode === "replace") action = replacement?.selectable
+    ? "Select to review replacement. Existing history will be replaced only after confirmation."
+    : checking && !replacement ? "Checking replacement eligibility…" : "Replacement is unavailable for this conversation.";
+  else if (!preview) action = checking ? "Checking source history and target identity…" : "No reconciliation preview is available.";
+  else if (preview.status === "new") action = mode === "sync"
+    ? "No eligible sync target was found. Use import to review a new conversation."
+    : "Select to import a new conversation. No eligible existing target was found.";
+  else if (preview.status === "syncable") action = "Select to append the settled missing turns. Existing messages and local titles are preserved.";
+  else if (preview.status === "up-to-date") action = "No settled messages need importing.";
+  else if (preview.status === "active-only") action = "Wait for the source turn to finish, then reopen this workspace to check again.";
+  else if (preview.status === "history-diverged") action = replacement?.selectable && mode === "auto"
+    ? "Conflict: select to review replacement. Histories will not be merged automatically."
+    : "Conflict: inspect the differing histories before choosing replacement.";
+  else if (preview.status === "branch-sync-unsupported") action = "Conflict: branches require separate inspection; automatic sync is unavailable.";
+  else action = "The previous target is missing. Inspect or restore it before retrying.";
+  if (review && preview?.status === "new") action = "Will import a new conversation after confirmation.";
+  if (review && preview?.status === "syncable") action = `Will append ${preview.newTurns} settled turn(s) after confirmation. Existing messages and local titles are preserved.`;
+  const warnings = [...new Set([...(preview?.warnings ?? []), ...(replacement?.warnings ?? [])])];
+  return <Box flexDirection="column" marginTop={1}>
+    <Text>{action}</Text>
+    {preview?.ignoredActiveTurns ? <Text color="yellow">{preview.ignoredActiveTurns} unfinished source turn(s) excluded; only settled history is eligible.</Text> : null}
+    {error ? <Text color="yellow">Reason: {error}</Text> : null}
+    {warnings.map((warning) => <Text key={warning} color="yellow">Reason: {warning}</Text>)}
+  </Box>;
+}
+
 export function ImportTui({ paths, initialSource, initialWorkspace, initialProvider, mode = "auto", resetCache = false }: TuiProps): React.JSX.Element {
   const app = useApp();
   const [screen, setScreen] = useState<Screen>("preflight");
@@ -208,6 +244,7 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
   const [syncPreviews, setSyncPreviews] = useState(new Map<string, ConversationSyncPreview>());
   const [replacePreviews, setReplacePreviews] = useState(new Map<string, ConversationReplacePreview>());
   const [pendingStatuses, setPendingStatuses] = useState(0);
+  const [inspectionErrors, setInspectionErrors] = useState(new Map<string, string>());
   const [preparedImports, setPreparedImports] = useState<ImportSelection[]>([]);
   const [preparedSync, setPreparedSync] = useState<SyncSelection[]>([]);
   const [preparedReplacements, setPreparedReplacements] = useState<ReplaceSelection[]>([]);
@@ -255,6 +292,19 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
     () => new Set(visibleThreads.flatMap((summary, itemIndex) => canSelect(summary) ? [] : [itemIndex])),
     [canSelect, visibleThreads],
   );
+  const statusCounts = useMemo(() => {
+    const counts = { new: 0, syncable: 0, current: 0, active: 0, conflicts: 0, unavailable: 0 };
+    for (const summary of visibleThreads) {
+      if (inspectionErrors.has(summary.id)) { counts.unavailable += 1; continue; }
+      const status = syncPreviews.get(summary.id)?.status;
+      if (status === "new") counts.new += 1;
+      else if (status === "syncable") counts.syncable += 1;
+      else if (status === "up-to-date") counts.current += 1;
+      else if (status === "active-only") counts.active += 1;
+      else if (status) counts.conflicts += 1;
+    }
+    return counts;
+  }, [visibleThreads, syncPreviews, inspectionErrors]);
   const importPreview = useMemo(() => preparedImports.reduce((counts, selection) => {
     for (const sourceThread of selection.conversation.threads) {
       const thread = compactThreadForImport(sourceThread);
@@ -329,6 +379,7 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
     setConversations(new Map());
     setSyncPreviews(new Map());
     setReplacePreviews(new Map());
+    setInspectionErrors(new Map());
     const worker = async () => {
       while (!cancelled) {
         const summary = queue.shift();
@@ -346,9 +397,9 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
           setSummaries((current) => current.map((item) => item.id === summary.id
             ? { ...item, title: conversation.summary.title, updatedAt: conversation.summary.updatedAt, status: conversation.summary.status }
             : item));
-        } catch {
-          // A failed row remains visible as unavailable; other conversations
-          // continue reconciling and can still be selected.
+        } catch (cause) {
+          if (!cancelled) setInspectionErrors((current) => new Map(current).set(summary.id,
+            cause instanceof Error ? cause.message : String(cause)));
         } finally {
           if (!cancelled) setPendingStatuses((count) => Math.max(0, count - 1));
         }
@@ -510,6 +561,18 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
               : syncText;
           return `${item.title}  ${status}`;
         })} index={index} selected={selectedVisible} disabled={disabledVisible} />
+        {mode !== "replace" ? <Text dimColor>
+          New: {statusCounts.new}{" · To sync: "}{statusCounts.syncable}
+          {" · Current: "}{statusCounts.current}{" · Active only: "}{statusCounts.active}
+          {" · Conflicts: "}{statusCounts.conflicts}{" · Unavailable: "}{statusCounts.unavailable}
+        </Text> : null}
+        {visibleThreads[index] ? <ConversationStatusDetails
+          preview={syncPreviews.get(visibleThreads[index]!.id)}
+          replacement={replacePreviews.get(visibleThreads[index]!.id)}
+          checking={checkingStatuses}
+          error={inspectionErrors.get(visibleThreads[index]!.id)}
+          mode={mode}
+        /> : null}
         {pendingStatuses > 0 ? <Text dimColor>Checking {pendingStatuses} conversation{pendingStatuses === 1 ? "" : "s"}…</Text> : null}
         {visibleThreads.length === 0 && <Text color="yellow">No matching conversations.</Text>}
       </>}
@@ -524,6 +587,10 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
           <Text>Imported turns: {importPreview.turns} · added turns: {syncPreview.turns} · adopted turns: {syncPreview.adopted}</Text>
           <Text>Messages: {importPreview.messages} · activities: {importPreview.activities} · attachments: {importPreview.attachments}</Text>
           <Text>Title updates: {syncPreview.titles}</Text>
+          {[...preparedImports, ...preparedSync].map((selection) => <Box key={selection.conversation.summary.id} flexDirection="column" marginTop={1}>
+            <Text bold>{selection.conversation.summary.title}</Text>
+            <ConversationStatusDetails preview={syncPreviews.get(selection.conversation.summary.id)} checking={false} mode={mode} review />
+          </Box>)}
           {preparedImports.length ? <Text>Provider for new tasks: {provider}</Text> : null}
           {resetCache ? <Text>T3 IndexedDB cache: back up and reset after successful changes</Text> : <Text>T3 IndexedDB cache: keep existing cache</Text>}
           <Text color="yellow">T3 must remain closed. A verified backup will be created before database changes.</Text>
