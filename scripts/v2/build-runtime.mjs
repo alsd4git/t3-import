@@ -4,10 +4,14 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, mkdirSync, mkdtempSync, copyFileSync, writeFileSync } from "node:fs";
 import { resolve, relative, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { releases } from "./releases.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const commit = "81493efb71e8e8244f95d3e9f71d8369654ab151";
-const archiveSha256 = "80336b0fef0ed4860474ffade2ffdb5e1e87975e5c19447402eb38304638a1ad";
+const release = process.argv[2] ?? "0.1.0";
+const profile = releases[release];
+if (!profile) throw new Error(`Unknown pinned release: ${release}`);
+const { commit, archiveSha256 } = profile;
+const vendor = resolve(root, "vendor", profile.directory);
 const cache = resolve(root, "artifacts/v2-runtime");
 mkdirSync(cache, { recursive: true });
 const archive = process.env.T3_V2_SOURCE_ARCHIVE ?? join(cache, `${commit}.tar.gz`);
@@ -20,15 +24,17 @@ if (createHash("sha256").update(readFileSync(archive)).digest("hex") !== archive
 const source = mkdtempSync(join(cache, "source-"));
 execFileSync("tar", ["-xzf", archive, "--strip-components=1", "-C", source]);
 execFileSync("npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund"], { cwd: resolve(root, "scripts/v2/dependencies"), stdio: "inherit" });
-mkdirSync(resolve(root, "vendor/t3-v010"), { recursive: true });
+mkdirSync(vendor, { recursive: true });
 const result = await build({
   entryPoints: [resolve(root, "scripts/v2/runtime-entry.mjs")],
-  outfile: resolve(root, "vendor/t3-v010/runtime.mjs"),
+  outfile: resolve(vendor, "runtime.mjs"),
   platform: "node", target: "node22.21", format: "esm", bundle: true,
-  external: ["effect", "effect/*"], write: false, metafile: true,
+  external: [profile.effectPackage, `${profile.effectPackage}/*`],
+  alias: { effect: profile.effectPackage }, write: false, metafile: true,
+  define: { __T3_REFERENCE__: JSON.stringify(commit) },
   absWorkingDir: root,
   nodePaths: [resolve(root, "scripts/v2/dependencies/node_modules")],
-  banner: { js: "// Generated from T3 Code v0.1.0, commit 81493efb71e8e8244f95d3e9f71d8369654ab151. MIT. See LICENSE.\nimport { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);" },
+  banner: { js: `// Generated from T3 Code v${release}, commit ${commit}. MIT. See LICENSE.\nimport { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);` },
   plugins: [{ name: "pinned-t3-workspace", setup(build) {
     build.onResolve({ filter: /artifacts\/t3-v010\/apps\/server\/src\// }, ({ path }) => {
       return { path: resolve(source, "apps/server/src", path.split("apps/server/src/")[1]) };
@@ -44,8 +50,8 @@ const result = await build({
     });
   } }],
 });
-writeFileSync(resolve(root, "vendor/t3-v010/runtime.mjs"), result.outputFiles[0].text.replaceAll(relative(root, source), "t3code-v0.1.0"));
-copyFileSync(resolve(source, "LICENSE"), resolve(root, "vendor/t3-v010/LICENSE"));
+writeFileSync(resolve(vendor, "runtime.mjs"), result.outputFiles[0].text.replaceAll(relative(root, source), `t3code-v${release}`));
+copyFileSync(resolve(source, "LICENSE"), resolve(vendor, "LICENSE"));
 const packages = new Map();
 for (const input of Object.keys(result.metafile.inputs)) {
   if (!input.includes("node_modules/")) continue;
@@ -64,9 +70,9 @@ for (const input of Object.keys(result.metafile.inputs)) {
   if (!licenses.length) throw new Error(`Missing license text for bundled package ${key}`);
   packages.set(key, licenses.sort().map((name) => readFileSync(join(dir, name), "utf8")).join("\n"));
 }
-writeFileSync(resolve(root, "vendor/t3-v010/THIRD-PARTY-NOTICES.txt"), [...packages].sort(([a], [b]) => a.localeCompare(b)).map(([name, license]) => `${name}\n${license}`).join("\n\n"));
-writeFileSync(resolve(root, "vendor/t3-v010/reference.json"), JSON.stringify({ tag: "v0.1.0", commit, archiveSha256, effect: "4.0.4" }, null, 2) + "\n");
-const { createSchema } = await import(pathToFileURL(resolve(root, "vendor/t3-v010/runtime.mjs")).href);
+writeFileSync(resolve(vendor, "THIRD-PARTY-NOTICES.txt"), [...packages].sort(([a], [b]) => a.localeCompare(b)).map(([name, license]) => `${name}\n${license}`).join("\n\n"));
+writeFileSync(resolve(vendor, "reference.json"), JSON.stringify({ tag: `v${release}`, commit, archiveSha256, effect: profile.effect }, null, 2) + "\n");
+const { createSchema } = await import(pathToFileURL(resolve(vendor, "runtime.mjs")).href);
 const schemaDirectory = mkdtempSync(join(cache, "schema-"));
 const schemaPath = join(schemaDirectory, "statev2.sqlite");
 await createSchema(schemaPath);
@@ -75,5 +81,5 @@ const db = new DatabaseSync(schemaPath, { readOnly: true });
 try {
   const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all();
   const columns = Object.fromEntries(tables.map(({ name }) => [name, db.prepare(`PRAGMA table_info(${name})`).all().map(({ name }) => name)]));
-  writeFileSync(resolve(root, "vendor/t3-v010/schema-columns.json"), JSON.stringify(columns, null, 2) + "\n");
+  writeFileSync(resolve(vendor, "schema-columns.json"), JSON.stringify(columns, null, 2) + "\n");
 } finally { db.close(); }

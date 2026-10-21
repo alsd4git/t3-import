@@ -14,7 +14,7 @@ import * as EventSink from "../../artifacts/t3-v010/apps/server/src/orchestratio
 import { runMigrations } from "../../artifacts/t3-v010/apps/server/src/persistence/Migrations.ts";
 import * as LegacyImport from "../../artifacts/t3-v010/apps/server/src/orchestration-v2/legacy/LegacyV1ThreadImporter.ts";
 
-export const reference = "81493efb71e8e8244f95d3e9f71d8369654ab151";
+export const reference = __T3_REFERENCE__;
 const decodeEvent = Schema.decodeUnknownSync(OrchestrationV2DomainEventJson);
 export function validateEvents(events) {
   for (const event of events) if (event.aggregateKind !== "project") decodeEvent(event);
