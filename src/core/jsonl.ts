@@ -1,5 +1,6 @@
 import { createReadStream, statSync } from "node:fs";
-import { createInterface } from "node:readline";
+import { StringDecoder } from "node:string_decoder";
+import { createZstdDecompress } from "node:zlib";
 import { sha256 } from "./util.js";
 
 export interface JsonlSnapshot {
@@ -9,12 +10,36 @@ export interface JsonlSnapshot {
   size: number;
 }
 
+/** Stream decoded lines without extracting or modifying provider files. */
+export async function* readJsonlLines(path: string): AsyncGenerator<string> {
+  const file = createReadStream(path);
+  const stream = path.endsWith(".jsonl.zst") ? file.compose(createZstdDecompress()) : file;
+  const decoder = new StringDecoder("utf8");
+  let pending = "";
+  try {
+    for await (const chunk of stream) {
+      pending += decoder.write(chunk);
+      let start = 0;
+      let end: number;
+      while ((end = pending.indexOf("\n", start)) !== -1) {
+        yield pending.slice(start, end).replace(/\r$/u, "");
+        start = end + 1;
+      }
+      pending = pending.slice(start);
+    }
+    pending += decoder.end();
+    if (pending) yield pending.replace(/\r$/u, "");
+  } finally {
+    stream.destroy();
+    file.destroy();
+  }
+}
+
 async function readOnce(path: string): Promise<JsonlSnapshot> {
   const before = statSync(path);
   const rows: unknown[] = [];
   const hashParts: string[] = [];
-  const lines = createInterface({ input: createReadStream(path, { encoding: "utf8" }), crlfDelay: Infinity });
-  for await (const line of lines) {
+  for await (const line of readJsonlLines(path)) {
     if (!line.trim()) continue;
     hashParts.push(line, "\n");
     try {

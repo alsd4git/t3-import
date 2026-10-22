@@ -55,7 +55,7 @@
     "compat:v2-schema": "node scripts/v2/generate-schema.mjs"
   },
   "engines": {
-    "node": ">=22"
+    "node": "^22.21.1 || >=24"
   },
   "license": "MIT",
   "publishConfig": {

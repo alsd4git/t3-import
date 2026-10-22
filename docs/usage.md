@@ -7,6 +7,12 @@ For activity inspection and optional Linux service stop/restart, see
 
 ## How it works
 
+Codex rollouts may be plain `.jsonl` or compressed `.jsonl.zst`. Both are read
+without extracting or modifying the originals. Decompressed content determines
+the sync fingerprint, so compression alone does not create new turns. When Codex
+resumes a compressed session and creates the matching plain rollout, the plain
+file takes precedence and the session appears only once.
+
 `t3-import` reads local Codex conversations through `codex app-server` and Codex rollout JSONL files. It reads Claude Code sessions from the JSONL files under `~/.claude/projects/`. OpenCode 2.x sessions are read from a consistent read-only SQLite transaction in `~/.local/share/opencode/opencode.db`, respecting `XDG_DATA_HOME` or an explicit `OPENCODE_DB`. Legacy OpenCode 1.x sessions are unsupported. The source data is normalized into conversations, turns, messages, tool activity, plans, usage, and supported image attachments.
 
 To keep T3 startup bounded, imports preserve every message, turn boundary, plan, image, error or approval, context compaction, and resume binding while compacting repetitive activity telemetry. Context-window snapshots are omitted, and long turns retain the latest visible reasoning summary plus a representative significant tool activity. The importer rejects any write that would exceed T3's safe one-launch projection budget.

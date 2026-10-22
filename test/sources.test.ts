@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClaudeSource } from "../src/sources/claude.js";
 import { CodexSource } from "../src/sources/codex.js";
+import { zstdCompressSync } from "node:zlib";
 
 const originalClaudeHome = process.env.CLAUDE_CONFIG_DIR;
 const originalCodexHome = process.env.CODEX_HOME;
@@ -28,6 +29,36 @@ function jsonl(path: string, rows: unknown[]): void {
 }
 
 describe("source adapters", () => {
+  it("discovers and loads compressed Codex sessions, preferring a coexisting plain rollout", async () => {
+    const root = await mkdtemp(join(tmpdir(), "t3-codex-zstd-"));
+    const sessions = join(root, "sessions"); mkdirSync(sessions);
+    process.env.CODEX_HOME = root;
+    process.env.CODEX_BIN = join(root, "missing-codex");
+    const id = "11111111-2222-4333-8444-555555555555";
+    const path = join(sessions, "rollout.jsonl");
+    const rows = [
+      { type: "session_meta", payload: { id, cwd: root } },
+      { type: "event_msg", payload: { type: "task_started", turn_id: "turn-1" } },
+      { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Test compresso" }] } },
+      { type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "Risposta" }] } },
+      { type: "event_msg", payload: { type: "task_complete", turn_id: "turn-1" } },
+    ];
+    writeFileSync(path + ".zst", zstdCompressSync(Buffer.from(rows.map((row) => JSON.stringify(row)).join("\n") + "\n")));
+    const source = new CodexSource();
+    try {
+      const summaries = await source.discover({});
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0]?.path).toBe(path + ".zst");
+      const compressed = await source.load(summaries[0]!, {});
+      expect(compressed.threads[0]?.turns).toHaveLength(1);
+      jsonl(path, rows);
+      const duplicates = await source.discover({});
+      expect(duplicates).toHaveLength(1);
+      expect(duplicates[0]?.path).toBe(path);
+      expect((await source.load(duplicates[0]!, {})).fingerprint).toBe(compressed.fingerprint);
+    } finally { await source.dispose(); }
+  });
+
   it("classifies Codex completed, aborted, failed, non-status error, and active turns", async () => {
     const root = await mkdtemp(join(tmpdir(), "t3-import-codex-status-"));
     const workspace = join(root, "workspace");

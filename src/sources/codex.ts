@@ -1,8 +1,6 @@
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
-import { createInterface } from "node:readline";
 import type {
   CanonicalActivity,
   CanonicalConversation,
@@ -16,7 +14,7 @@ import type {
   SourceAttachment,
   SourceSummary,
 } from "../core/types.js";
-import { readStableJsonl } from "../core/jsonl.js";
+import { readJsonlLines, readStableJsonl } from "../core/jsonl.js";
 import {
   canonicalPath,
   deriveTitle,
@@ -456,27 +454,24 @@ interface RolloutHeader {
 }
 
 async function readRolloutHeader(path: string, fallbackTime: string): Promise<RolloutHeader | undefined> {
-  const lines = createInterface({ input: createReadStream(path, { encoding: "utf8" }), crlfDelay: Infinity });
-  try {
-    let inspected = 0;
-    for await (const line of lines) {
-      if (!line.trim()) continue;
-      inspected += 1;
-      try {
-        const row = JSON.parse(line) as unknown;
-        if (isObject(row) && row.type === "session_meta" && isObject(row.payload)) {
-          const id = stringValue(row.payload.id) ?? stringValue(row.payload.session_id);
-          const workspace = stringValue(row.payload.cwd);
-          if (id && workspace) {
-            const threadSource = stringValue(row.payload.thread_source);
-            return { id, workspace, createdAt: isoTimestamp(row.payload.timestamp, isoTimestamp(row.timestamp, fallbackTime)), child: Boolean(threadSource && threadSource !== "user") };
-          }
+  let inspected = 0;
+  for await (const line of readJsonlLines(path)) {
+    if (!line.trim()) continue;
+    inspected += 1;
+    try {
+      const row = JSON.parse(line) as unknown;
+      if (isObject(row) && row.type === "session_meta" && isObject(row.payload)) {
+        const id = stringValue(row.payload.id) ?? stringValue(row.payload.session_id);
+        const workspace = stringValue(row.payload.cwd);
+        if (id && workspace) {
+          const threadSource = stringValue(row.payload.thread_source);
+          return { id, workspace, createdAt: isoTimestamp(row.payload.timestamp, isoTimestamp(row.timestamp, fallbackTime)), child: Boolean(threadSource && threadSource !== "user") };
         }
-      } catch { /* selected loads report malformed JSONL precisely */ }
-      if (inspected >= 32) return undefined;
-    }
-    return undefined;
-  } finally { lines.close(); }
+      }
+    } catch { /* selected loads report malformed JSONL precisely */ }
+    if (inspected >= 32) return undefined;
+  }
+  return undefined;
 }
 
 function appTimestamp(value: number | undefined, fallback: string): string {
@@ -499,7 +494,11 @@ async function fastSummaries(options: DiscoveryOptions): Promise<SourceSummary[]
   } catch {
     // Older Codex installations may not have a session index.
   }
-  const files = await walkFiles(join(codexRoot(), "sessions"), ".jsonl");
+  // Prefer the writable rollout when both forms coexist during compression or
+  // resumption. A session must appear once, regardless of storage format.
+  const discovered = await walkFiles(join(codexRoot(), "sessions"), [".jsonl", ".jsonl.zst"]);
+  const plain = new Set(discovered.filter((path) => path.endsWith(".jsonl")));
+  const files = discovered.filter((path) => !path.endsWith(".jsonl.zst") || !plain.has(path.slice(0, -4)));
   const values = await Promise.all(files.map(async (path): Promise<SourceSummary | undefined> => {
     try {
       const fileStat = await stat(path);
