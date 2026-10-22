@@ -38,9 +38,13 @@ It is distributed as a GitHub release tarball. It is not yet published on npm.
 The upstream `@carlosgtrz/t3-import` package does not contain this fork's features.
 
 ```sh
-npm install --global https://github.com/alsd4git/t3-import/releases/download/v0.5.0-fork.1/alsd4git-t3-import-0.5.0-fork.1.tgz
+npm install --global --allow-scripts=better-sqlite3 https://github.com/alsd4git/t3-import/releases/download/v0.5.0-fork.1/alsd4git-t3-import-0.5.0-fork.1.tgz
 t3-import --version
 ```
+
+The script approval allows the native SQLite dependency to install with recent
+npm versions. Older npm versions may report the option as unknown; their normal
+install-script behavior still applies.
 
 To build from source:
 

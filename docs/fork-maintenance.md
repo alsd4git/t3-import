@@ -40,7 +40,7 @@ issue and installation links without rewriting historical validation reports.
 3. Build the artifact from the committed tree with `npm pack` into
    `artifacts/release-candidate`. Retain the artifact's SHA-256 checksum.
 4. Create an annotated version tag and a GitHub prerelease containing the tarball,
-   checksum and relevant changelog notes. Do not move existing tags.
+   checksum and relevant changelog notes. Do not move published tags.
 5. Verify the downloadable artifact matches the local checksum. Keep npm
    publication a separate explicit action; a GitHub release does not publish npm.
 
