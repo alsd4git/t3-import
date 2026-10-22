@@ -1,12 +1,40 @@
 # t3-import
 
-`t3-import` is an independent, local-only CLI for importing Codex and Claude Code conversation history into [T3 Code](https://github.com/pingdotgg/t3code). It writes canonical orchestration events while T3 is closed. The original provider session is bound so the current branch can resume when the source history is still available.
+`t3-import` is an independent, local-only CLI for importing Codex, Claude Code, and OpenCode conversation history into [T3 Code](https://github.com/pingdotgg/t3code). It writes canonical orchestration events while T3 is closed. The original provider session is bound so the current branch can resume when the source history is still available.
 
-This fork's development prerelease adds **T3 Code 0.1.0 / Orchestrator V2, migration 62**, alongside V1 migrations 40–54. V2 operations require Node.js 22.21.1+ or 24+ and local files. Unknown schemas fail closed. This support is not in the upstream npm release; use this checkout or a package built from it.
+This fork's development prerelease adds **T3 Code 0.1.0 and 0.1.1 / Orchestrator V2, migrations 62 and 67**, alongside V1 migrations 40–54. V2 operations require Node.js 22.21.1+ or 24+ and local files. Unknown schemas fail closed. This support is not in the upstream npm release; use this checkout or a package built from it.
+
+## OpenCode and interactive destinations
+
+This fork synchronizes provider history **into T3 only**. Continuing a bound native
+session in T3 uses the provider's own session; there is no reverse transcript writer.
+OpenCode import and sync require T3 V2. They preserve the session ID, source cwd,
+model and variant, user/assistant messages, reasoning and tool activity. System and
+synthetic control records stay in OpenCode and produce import warnings. Child and
+archived sessions are excluded from normal discovery. Active trailing turns are
+ignored by default; gaps in terminal history fail closed rather than dropping an
+intermediate user prompt. `--include-incomplete` is an explicit historical snapshot.
+
+Close T3 and start `node dist/cli.js import --source opencode` for the interactive
+flow. The existing TUI now offers the destination project and displays the working
+directory before applying. Existing projects must match the source cwd; native
+"No project" is available only for an eligible managed scratch directory.
+
+```text
+node dist/cli.js list --source opencode --json
+node dist/cli.js sync --source opencode --all --dry-run --yes --non-interactive --json
+node dist/cli.js links --source codex --include-subagents --json
+```
+
+`links` is read-only and can run while T3 is open, with a provisional flag. It
+reports verified native bindings, origins, lineage, cwd and ambiguity. It does
+not compare transcripts or rename anything. The personal
+`codex-thread-normalizer` skill can consume this report to prepare an approved
+Codex naming plan, including explicitly requested T3 child markers.
 
 ## How it works
 
-`t3-import` reads local Codex conversations through `codex app-server` and Codex rollout JSONL files. It reads Claude Code sessions from the JSONL files under `~/.claude/projects/`. The source data is normalized into conversations, turns, messages, tool activity, plans, usage, and supported image attachments.
+`t3-import` reads local Codex conversations through `codex app-server` and Codex rollout JSONL files. It reads Claude Code sessions from the JSONL files under `~/.claude/projects/`. OpenCode 2.x sessions are read from a consistent read-only SQLite transaction in `~/.local/share/opencode/opencode.db`, respecting `XDG_DATA_HOME` or an explicit `OPENCODE_DB`. Legacy OpenCode 1.x sessions are unsupported. The source data is normalized into conversations, turns, messages, tool activity, plans, usage, and supported image attachments.
 
 To keep T3 startup bounded, imports preserve every message, turn boundary, plan, image, error or approval, context compaction, and resume binding while compacting repetitive activity telemetry. Context-window snapshots are omitted, and long turns retain the latest visible reasoning summary plus a representative significant tool activity. The importer rejects any write that would exceed T3's safe one-launch projection budget.
 
@@ -14,7 +42,7 @@ With T3 Code closed, the importer validates the local database and creates a ver
 
 The default target is `userdata/statev2.sqlite` when it exists, otherwise `userdata/state.sqlite`. The importer never falls back to V1 when a V2 database is incompatible. Writes to the old `state.sqlite` are refused when a sibling V2 database exists. Let T3 perform its upgrade and finish hydrating migrated threads before synchronizing them. Existing importer identities are recovered from retained V1 events; titles and similar paths do not establish identity.
 
-`sync` can append newly settled Codex turns and newly settled turns from linear Claude conversations to imported tasks. It can also adopt a native T3 Codex thread through a unique stopped V1 binding or a V2 native-thread reference, with matching execution cwd and no unfinished V2 work. Before appending, it verifies that the visible user and assistant history is a settled prefix of the provider transcript; a mismatch or ambiguous binding is reported as a conflict. The T3 thread ID and local title are preserved, and the already-visible prefix is not written again. Completed, interrupted, and failed turns are preserved; only genuinely active or indeterminate turns are ignored during synchronization. Claude sessions with multiple non-sidechain leaves after deterministic compaction and retry normalization are reported as conflicts rather than guessed. This is an explicit one-shot sync; it does not watch sessions or synchronize continuously in the background.
+`sync` can append newly settled Codex and OpenCode turns and newly settled turns from linear Claude conversations to imported tasks. It can also adopt a native T3 Codex or OpenCode thread through a unique stopped V1 binding or a V2 native-thread reference, with matching execution cwd and no unfinished V2 work. Before appending, it verifies that the visible user and assistant history is a settled prefix of the provider transcript; a mismatch or ambiguous binding is reported as a conflict. The T3 thread ID and local title are preserved, and the already-visible prefix is not written again. Completed, interrupted, and failed turns are preserved; only genuinely active or indeterminate turns are ignored during synchronization. Claude sessions with multiple non-sidechain leaves after deterministic compaction and retry normalization are reported as conflicts rather than guessed. This is an explicit one-shot sync; it does not watch sessions or synchronize continuously in the background.
 
 If an imported task has diverged or was created by an older importer, `replace` can create a fresh, complete canonical task from the provider transcript. The old task is soft-deleted with a `thread.deleted` event, while its immutable event stream remains available for audit. The provider instance, model, resume cursor, project, and synchronization identity move to the new task atomically. When deterministic normalization reduces a previously fragmented Claude session to one leaf, replacement consolidates every still-visible imported fragment of that session into the new task. Replacement is available for Codex and for Claude sessions with one normalized non-sidechain leaf, and it refuses to snapshot an active provider turn.
 
@@ -29,6 +57,10 @@ t3-import
 ```
 
 Running without a command opens the interactive TUI. It guides you through source, workspace, provider instance, conversation selection, review, confirmation, and results, then offers to start T3 Code with Yes selected by default.
+
+Without an explicit `--workspace`, the TUI shows all discovered working folders.
+It does not filter to the current directory or an ancestor of the checkout.
+Pass `--workspace <path>` to open that folder's conversation list directly.
 
 For non-interactive `import`, `--workspace` is required and filters source discovery. By default, the destination project is determined by the selected conversation's recorded workspace: the importer reuses a matching T3 project or creates one named after that directory. It does not clone or move the source repository. Omitting `--workspace` does not select T3's "No project" area.
 
@@ -124,7 +156,7 @@ When `--json` is active, stdout contains one versioned JSON value and diagnostic
 - Every write creates and verifies a timestamped SQLite backup under `<state-dir>/t3-import-backups/`.
 - Automatic backups cover the T3 database and, when reset, its IndexedDB cache. They do not include the external import ledger. Keep a separate consistent ledger backup if you need recovery. If a ledger is corrupt, preserve it and its WAL/SHM sidecars; restore a verified user-maintained backup if available, or investigate recovery before further writes. Do not simply delete it, since it may contain replacement history.
 - Successful imports, syncs, and replacements reset T3's rebuildable IndexedDB origin cache by default. The cache is moved aside, copied and verified under the same backup directory before removal; use `--no-cache-reset` to opt out.
-- V1 writes append `orchestration_events` and stopped rows in `provider_session_runtime`; T3 projects them at startup. V2 writes use the official event sink and projection stores bundled from the pinned 0.1.0 source. The importer does not maintain a second projection implementation.
+- V1 writes append `orchestration_events` and stopped rows in `provider_session_runtime`; T3 projects them at startup. V2 writes use the official event sink and projection stores bundled separately from the pinned 0.1.0 and 0.1.1 sources. The importer does not maintain a second projection implementation.
 - V2 operations refuse unfinished runs, pending legacy transcript hydration, ambiguous source bindings, changed native sessions, and source/target cwd mismatches. If verification fails after a committed V2 write, the error explicitly reports that commit and retains its attachments. External-ledger failures are reported separately from the database commit.
 - Native Codex adoption requires a unique provider link, an exact working-directory match, and a verified visible transcript prefix. V1 bindings must be stopped; V2 threads must have no unfinished work. Ambiguous or divergent histories are left untouched.
 - Imports are idempotent. A second import reports `already-imported`. `sync` only appends completed, interrupted, or failed turns after an unchanged checkpoint, and repeated syncs are no-ops. `replace` promotes one complete new task as the sole synchronization target and soft-deletes the old canonical task; repeating it against that unchanged replacement is also a no-op.
@@ -152,7 +184,7 @@ npm run build
 npm pack
 ```
 
-V1 compatibility uses pinned historical T3 commits for migrations 40–54. V2 is pinned to stable `v0.1.0`, commit `81493efb71e8e8244f95d3e9f71d8369654ab151`, at migration 62. Migrations 55–61 and unvalidated future migrations fail closed. Production import/sync never upgrades a database; T3 owns that migration.
+V1 compatibility uses pinned historical T3 commits for migrations 40–54. V2 is pinned to stable `v0.1.0`, commit `81493efb71e8e8244f95d3e9f71d8369654ab151`, at migration 62. Stable `v0.1.1` is pinned separately to `fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92`, at migration 67. Intermediate migrations 55–61 and 63–66 and unvalidated future migrations fail closed. Production import/sync never upgrades a database; T3 owns that migration.
 
 `npm test` uses committed schemas generated from T3's actual migrations. The additional integration matrix runs the historical event decoders, projectors, and provider restoration services against synthetic databases:
 

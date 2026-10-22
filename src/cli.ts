@@ -11,6 +11,8 @@ import { ImportTui } from "./tui.js";
 import { ImporterError, usageError } from "./core/errors.js";
 import { validateDestinationOptions } from "./target/destination.js";
 import type { ImportRunResult, ReplaceRunResult, SourceName, SourceSummary, SyncRunResult } from "./core/types.js";
+import { sourceNames } from "./core/providers.js";
+import { inspectLinkedThreads } from "./target/reconciliation.js";
 import { disposeSourceAdapters, sourceAdapter } from "./sources/index.js";
 import { resolveTargetPaths, type TargetOverrides } from "./target/config.js";
 import { IMPORTER_VERSION, importConversations } from "./target/importer.js";
@@ -20,7 +22,7 @@ import { syncAllLinkedConversations } from "./target/syncAll.js";
 import { replaceConversations } from "./target/replace.js";
 import { discoverT3CacheProfiles, formatCacheResetResult, resetT3RebuildableCache } from "./target/cache.js";
 
-const sourceSchema = z.enum(["codex", "claude"]);
+const sourceSchema = z.enum(sourceNames);
 const program = new Command();
 
 function collect(value: string, previous: string[]): string[] { return [...previous, value]; }
@@ -92,7 +94,7 @@ async function attachCacheReset<T extends ImportRunResult | SyncRunResult | Repl
 
 program
   .name("t3-import")
-  .description("Import, synchronize, and replace Codex and Claude Code conversations in T3 Code")
+  .description("Import, synchronize, and replace Codex, Claude Code, and OpenCode conversations in T3 Code")
   .version(IMPORTER_VERSION)
   .option("--t3-home <path>", "T3 home directory")
   .option("--db <path>", "T3 database path (state.sqlite or statev2.sqlite)")
@@ -108,9 +110,21 @@ program
     await instance.waitUntilExit();
   });
 
+program.command("links")
+  .description("Inspect provider bindings, origins and lineage without changing metadata or transcripts")
+  .option("--source <source>", "codex, claude, or opencode")
+  .option("--include-subagents", "include child threads in the read-only report")
+  .option("--include-archived", "include archived threads in the read-only report")
+  .action(async (options: { source?: string; includeSubagents?: boolean; includeArchived?: boolean }) => {
+    print(await inspectLinkedThreads(resolveTargetPaths(globalOverrides()), {
+      ...(options.source ? { source: sourceName(options.source) } : {}),
+      includeSubagents: Boolean(options.includeSubagents), includeArchived: Boolean(options.includeArchived),
+    }));
+  });
+
 program.command("list")
   .description("List source conversations")
-  .requiredOption("--source <source>", "codex or claude")
+  .requiredOption("--source <source>", "codex, claude, or opencode")
   .option("--workspace <path>")
   .option("--since <date>", "ISO date/time")
   .action(async (options: { source: string; workspace?: string; since?: string }) => {
@@ -123,7 +137,7 @@ program.command("list")
 
 program.command("show")
   .description("Show an import preview")
-  .requiredOption("--source <source>", "codex or claude")
+  .requiredOption("--source <source>", "codex, claude, or opencode")
   .requiredOption("--thread <id>")
   .option("--workspace <path>")
   .option("--include-incomplete")
@@ -150,7 +164,7 @@ program.command("doctor")
     }
     const staging = existsSync(paths.attachmentsDir) ? readdirSync(paths.attachmentsDir).filter((name) => name.startsWith(".t3-import-staging-")) : [];
     const sources: Record<string, unknown> = {};
-    for (const name of ["codex", "claude"] as const) {
+    for (const name of sourceNames) {
       try { const items = await sourceAdapter(name).discover({}); sources[name] = { available: true, conversations: items.length, workspaces: new Set(items.map((item) => item.workspace)).size }; }
       catch (error) { sources[name] = { available: false, error: error instanceof Error ? error.message : String(error) }; }
     }
@@ -172,7 +186,7 @@ cacheCommand.command("reset")
 
 program.command("import")
   .description("Import selected conversations")
-  .addOption(new Option("--source <source>", "codex or claude"))
+  .addOption(new Option("--source <source>", "codex, claude, or opencode"))
   .option("--workspace <path>")
   .option("--target-project <id>", "existing T3 project ID; its root must match the source cwd")
   .option("--no-project", "use native No project for a source cwd already inside T3 scratch")
@@ -227,7 +241,7 @@ program.command("import")
 
 program.command("replace")
   .description("Replace canonical T3 tasks with complete provider transcripts")
-  .addOption(new Option("--source <source>", "codex or claude"))
+  .addOption(new Option("--source <source>", "codex, claude, or opencode"))
   .option("--workspace <path>")
   .option("--thread <id>", "source conversation id (repeatable)", collect, [])
   .option("--dry-run")
@@ -269,7 +283,7 @@ program.command("replace")
 
 program.command("sync")
   .description("Append new turns to imported tasks and safely adopt matching native Codex threads")
-  .addOption(new Option("--source <source>", "codex or claude"))
+  .addOption(new Option("--source <source>", "codex, claude, or opencode"))
   .option("--workspace <path>")
   .option("--thread <id>", "source conversation id (repeatable)", collect, [])
   .option("--all", "synchronize linked tasks; omit --workspace to scan all Codex projects")

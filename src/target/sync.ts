@@ -11,6 +11,7 @@ import type {
   TargetPaths,
   CanonicalTerminalTurnStatus,
 } from "../core/types.js";
+import { sourceDriver, type ProviderDriver } from "../core/providers.js";
 import { isTerminalTurn } from "../core/types.js";
 import { checkpointForThread, legacyTurnSemanticHash, parseCheckpoint, turnSemanticHash, type ImportCheckpoint, type ImportCheckpointV2 } from "../core/checkpoint.js";
 import { canonicalPath, deterministicUuid, isObject, sha256, stringValue } from "../core/util.js";
@@ -131,14 +132,14 @@ export function existingProvider(db: Database.Database, thread: CanonicalThread,
   const runtime = db.prepare(`
     SELECT provider_name providerName, provider_instance_id instanceId, adapter_key adapterKey
     FROM provider_session_runtime WHERE thread_id = ?
-  `).get(record.threadId) as { providerName: "codex" | "claudeAgent"; instanceId: string; adapterKey: "codex" | "claudeAgent" } | undefined;
+  `).get(record.threadId) as { providerName: ProviderDriver; instanceId: string; adapterKey: ProviderDriver } | undefined;
   const current = isV2Database(db) ? v2Thread(db, record.threadId) : undefined;
   const createdSelection = current?.modelSelection ?? createEvent(events)?.payload.modelSelection;
   const selection = isObject(createdSelection) ? createdSelection : {};
   const options = Array.isArray(selection.options)
     ? selection.options.filter((value): value is { id: string; value: string | boolean } => isObject(value) && typeof value.id === "string" && (typeof value.value === "string" || typeof value.value === "boolean"))
     : [];
-  const providerName = runtime?.providerName ?? (thread.source === "codex" ? "codex" : "claudeAgent");
+  const providerName = runtime?.providerName ?? sourceDriver(thread.source);
   return {
     providerName,
     instanceId: stringValue(current?.providerInstanceId) ?? runtime?.instanceId ?? stringValue(selection.instanceId) ?? providerName,
@@ -153,14 +154,18 @@ function canonicalMarker(seed: string): string {
 }
 
 const NATIVE_CODEX_SEED_PREFIX = "t3-import:native-codex:";
+function nativeSeedPrefix(source: string): string {
+  return source === "opencode" ? "t3-import:native-opencode:" : NATIVE_CODEX_SEED_PREFIX;
+}
 
-function nativeCodexRecord(
+function nativeProviderRecord(
   db: Database.Database,
   paths: TargetPaths,
   thread: CanonicalThread,
 ): StoredLedgerRecord | undefined {
+  const driver = sourceDriver(thread.source);
   if (isV2Database(db)) {
-    const linked = v2ProviderThreads(db).filter((row) => row.driver === "codex" && isObject(row.nativeThreadRef) && row.nativeThreadRef.driver === "codex" && row.nativeThreadRef.strength === "strong"
+    const linked = v2ProviderThreads(db).filter((row) => row.driver === driver && isObject(row.nativeThreadRef) && row.nativeThreadRef.driver === driver && row.nativeThreadRef.strength === "strong"
       && row.nativeThreadRef.nativeId === thread.sourceSessionId && typeof row.appThreadId === "string"
       && !v2Thread(db, row.appThreadId)?.deletedAt);
     const ids = [...new Set(linked.map((row) => String(row.appThreadId)))];
@@ -171,18 +176,19 @@ function nativeCodexRecord(
       const created = createEvent(events);
       const projectId = stringValue(created?.payload.projectId);
       if (created && projectId && canonicalPath(threadWorkingDirectory(db, threadId, "").cwd) === canonicalPath(thread.workspace)) {
-        return { targetId: targetId(paths), source: "codex", sourceSessionId: thread.sourceSessionId,
+        return { targetId: targetId(paths), source: thread.source, sourceSessionId: thread.sourceSessionId,
           sourceKey: thread.sourceKey, sourceFingerprint: "", projectId, threadId,
           importedAt: stringValue(created.payload.createdAt) ?? thread.createdAt,
           importerVersion: "native-adoption", migration: targetMigration(db),
           firstSequence: created.sequence, lastSequence: events.at(-1)?.sequence ?? created.sequence,
           resumable: true, backupPath: "", warnings: [],
-          identitySeed: `${NATIVE_CODEX_SEED_PREFIX}${thread.sourceSessionId}:${threadId}`,
+          identitySeed: `${nativeSeedPrefix(thread.source)}${thread.sourceSessionId}:${threadId}`,
           currentSourceKey: thread.sourceKey, sourceTitle: thread.title, isCanonical: true };
       }
       return undefined;
     }
   }
+  if (thread.source !== "codex") return undefined;
   const candidates = db.prepare(`
     SELECT thread_id threadId, resume_cursor_json cursor, runtime_payload_json runtime, status
     FROM provider_session_runtime
@@ -217,9 +223,9 @@ function nativeCodexRecord(
     if (!root || (canonicalPath(root) !== canonicalPath(thread.workspace)
       && (!cwd || canonicalPath(cwd) !== canonicalPath(thread.workspace)))) return undefined;
   } catch { return undefined; }
-  const identitySeed = `${NATIVE_CODEX_SEED_PREFIX}${thread.sourceSessionId}:${threadId}`;
+  const identitySeed = `${nativeSeedPrefix(thread.source)}${thread.sourceSessionId}:${threadId}`;
   return {
-    targetId: targetId(paths), source: "codex", sourceSessionId: thread.sourceSessionId,
+    targetId: targetId(paths), source: thread.source, sourceSessionId: thread.sourceSessionId,
     sourceKey: thread.sourceKey, sourceFingerprint: "", projectId, threadId,
     importedAt: stringValue(created.payload.createdAt) ?? thread.createdAt,
     importerVersion: "native-adoption", migration: targetMigration(db),
@@ -232,8 +238,8 @@ function nativeCodexRecord(
 }
 
 export function validRecord(db: Database.Database, record: StoredLedgerRecord): boolean {
-  if (record.identitySeed.startsWith(NATIVE_CODEX_SEED_PREFIX)) {
-    if (isV2Database(db) && v2ProviderThreads(db, record.threadId).some((row) => row.driver === "codex" && isObject(row.nativeThreadRef) && row.nativeThreadRef.driver === "codex" && row.nativeThreadRef.strength === "strong" && row.nativeThreadRef.nativeId === record.sourceSessionId)) {
+  if (record.identitySeed.startsWith(nativeSeedPrefix(record.source))) {
+    if (isV2Database(db) && v2ProviderThreads(db, record.threadId).some((row) => row.driver === sourceDriver(record.source) && isObject(row.nativeThreadRef) && row.nativeThreadRef.driver === sourceDriver(record.source) && row.nativeThreadRef.strength === "strong" && row.nativeThreadRef.nativeId === record.sourceSessionId)) {
       return Boolean(v2Thread(db, record.threadId)) && !v2Thread(db, record.threadId)?.deletedAt;
     }
     const runtime = db.prepare(`
@@ -260,6 +266,9 @@ export function fallbackRecord(db: Database.Database, paths: TargetPaths, thread
   let seed = thread.sourceKey;
   if (thread.source === "codex") {
     threadId = thread.sourceSessionId;
+  } else if (thread.source === "opencode") {
+    if (!isV2Database(db)) return undefined;
+    threadId = deterministicUuid(`t3-import:thread:${thread.sourceKey}`);
   } else {
     if (isV2Database(db)) threadId = deterministicUuid(`t3-import:thread:${thread.sourceKey}`);
     const candidates = db.prepare("SELECT thread_id threadId, resume_cursor_json cursor FROM provider_session_runtime WHERE provider_name = 'claudeAgent'").all() as Array<{ threadId: string; cursor: string | null }>;
@@ -287,7 +296,7 @@ export function fallbackRecord(db: Database.Database, paths: TargetPaths, thread
     .map((candidate) => ({ candidate, created: events.find((row) => row.eventId === canonicalMarker(candidate)) }))
     .find((candidate) => candidate.created);
   const created = matched?.created;
-  if (!created) return thread.source === "codex" ? nativeCodexRecord(db, paths, thread) : undefined;
+  if (!created) return thread.source !== "claude" ? nativeProviderRecord(db, paths, thread) : undefined;
   seed = matched!.candidate;
   const projectId = stringValue(created.payload.projectId);
   if (!projectId) return undefined;
@@ -551,7 +560,7 @@ function nativeCodexPrefixLength(thread: CanonicalThread, events: EventRow[]): n
     // original T3 prompt. Accept that only when the visible prompt is its exact
     // final segment; all later turns must match byte-for-byte.
     const userMatches = sourceUser === nativeUser
-      || (index === 0 && sourceUser.endsWith(`\n\n${nativeUser}`));
+      || (thread.source === "codex" && index === 0 && sourceUser.endsWith(`\n\n${nativeUser}`));
     const actualAttachments = eventAttachments(native.user);
     const expectedAttachments = source ? sourceAttachments(source) : [];
     const actualAssistant = native.assistant.map((row) => stringValue(row.payload.text) ?? "");
@@ -625,7 +634,7 @@ function buildPlan(db: Database.Database, paths: TargetPaths, conversation: Cano
   if (thread.source === "claude" && conversation.summary.branches !== 1) {
     return { conversation, thread, record, result: conflictResult(thread, "branch-sync-unsupported", "Claude synchronization currently requires exactly one non-sidechain leaf.", record), titleEvent: false, previouslyImported: true };
   }
-  const nativeAdoption = record.identitySeed.startsWith(NATIVE_CODEX_SEED_PREFIX);
+  const nativeAdoption = record.identitySeed.startsWith(nativeSeedPrefix(record.source));
   const bootstrapped = record.checkpoint ? undefined : bootstrapCheckpoint(thread, record, events);
   const checkpoint = record.checkpoint ?? bootstrapped?.checkpoint;
   const sourcePrefixLength = checkpoint
@@ -636,7 +645,7 @@ function buildPlan(db: Database.Database, paths: TargetPaths, conversation: Cano
   }
   const adopted = nativeAdoption
     ? checkpoint ? nativeCodexAdoptedTurns(thread, sourcePrefixLength, events, record.lastSequence) : 0
-    : thread.source === "codex"
+    : thread.source !== "claude"
     ? isV2Database(db) ? nativeCodexAdoptedTurns(thread, sourcePrefixLength, events, bootstrapped?.lastSequence ?? record.lastSequence) : codexAdoptedTurns(thread, sourcePrefixLength, events, bootstrapped?.lastSequence ?? record.lastSequence)
     : claudeAdoptedTurns(thread, sourcePrefixLength, events, bootstrapped?.lastSequence ?? record.lastSequence);
   if (adopted < 0) return { conversation, thread, record, result: conflictResult(thread, "history-diverged", "T3 contains an ambiguous or partial provider turn suffix.", record), titleEvent: false, previouslyImported: true };

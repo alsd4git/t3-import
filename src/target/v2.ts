@@ -5,6 +5,9 @@ import { compatibilityError, safetyError } from "../core/errors.js";
 import type { PlannedEvent, PlannedThread } from "./importer.js";
 import type { CanonicalThread } from "../core/types.js";
 import { threadWorkingDirectory } from "./destination.js";
+import { targetMigration } from "./schema.js";
+import { v2Profiles } from "./v2Profiles.js";
+import { sourceDriver, nativeSessionId } from "../core/providers.js";
 
 type Json = Record<string, unknown>;
 interface V2Event extends Json { id: string; threadId: string; type: string; occurredAt: string; payload: Json }
@@ -14,10 +17,12 @@ interface RuntimeModule {
 }
 
 // The published package carries the same pinned runtime as the source checkout.
-async function runtime(): Promise<RuntimeModule> {
+async function runtime(db: Database.Database): Promise<RuntimeModule> {
   const [major, minor, patch] = process.versions.node.split(".").map(Number);
   if (!major || major < 22 || (major === 22 && (minor! < 21 || (minor === 21 && patch! < 1))) || major === 23) throw compatibilityError("T3 V2 operations require Node.js 22.21.1+ or 24+. Use a supported LTS runtime.");
-  const url = new URL("../../vendor/t3-v010/runtime.mjs", import.meta.url);
+  const profile = v2Profiles[targetMigration(db)];
+  if (!profile) throw compatibilityError("No pinned V2 runtime for this database.");
+  const url = new URL(`../../vendor/${profile.directory}/runtime.mjs`, import.meta.url);
   return import(url.href) as Promise<RuntimeModule>;
 }
 
@@ -44,13 +49,13 @@ export function v2ProviderThreads(db: Database.Database, threadId?: string): Jso
 }
 
 export function isV2ProviderSubagent(thread: Json | undefined): boolean {
-  return thread?.creationSource === "provider" && isObject(thread.lineage) && thread.lineage.relationshipToParent === "subagent";
+  return isObject(thread?.lineage) && thread.lineage.relationshipToParent === "subagent";
 }
 
 export function v2SourceConflict(db: Database.Database, threadId: string, source: CanonicalThread): string | undefined {
   const current = v2Thread(db, threadId);
   if (isV2ProviderSubagent(current)) return "Native provider-managed subagent history is not a writable synchronization target.";
-  const driver = source.source === "codex" ? "codex" : "claudeAgent";
+  const driver = sourceDriver(source.source);
   const linkedThreads = new Set(v2ProviderThreads(db).filter((row) => row.driver === driver && isObject(row.nativeThreadRef)
     && row.nativeThreadRef.nativeId === source.sourceSessionId && typeof row.appThreadId === "string"
     && !v2Thread(db, row.appThreadId)?.deletedAt).map((row) => String(row.appThreadId)));
@@ -59,7 +64,7 @@ export function v2SourceConflict(db: Database.Database, threadId: string, source
   const providerThreads = v2ProviderThreads(db, threadId);
   const active = providerThreads.find((row) => row.id === current?.activeProviderThreadId);
   const ref = active && isObject(active.nativeThreadRef) ? active.nativeThreadRef : undefined;
-  if (ref && (ref.driver !== (source.source === "codex" ? "codex" : "claudeAgent") || ref.nativeId !== source.sourceSessionId)) return "The V2 thread now uses a different native provider session. Preserve both histories.";
+  if (ref && (ref.driver !== driver || ref.nativeId !== source.sourceSessionId)) return "The V2 thread now uses a different native provider session. Preserve both histories.";
   if (active && active.providerInstanceId !== current?.providerInstanceId) return "The V2 thread has a pending provider-instance switch. Resolve it in T3 before synchronizing.";
   if (canonicalPath(threadWorkingDirectory(db, threadId, source.workspace).cwd) !== canonicalPath(source.workspace)) return "Source and V2 working directories differ. Review the workspace change before synchronizing.";
   return undefined;
@@ -85,6 +90,8 @@ function appThread(plan: PlannedThread, payload: Json): Json {
 export function v2Events(db: Database.Database, plan: PlannedThread): Json[] {
   const events: Json[] = [];
   const storedThread = v2Thread(db, plan.threadId);
+  const head = plan.thread.source === "claude" ? plan.thread.resumeCursor?.resumeSessionAt
+    : plan.thread.source === "opencode" ? plan.thread.resumeCursor?.headMessageId : undefined;
   let thread = storedThread;
   let ordinal = (db.prepare("SELECT COALESCE(MAX(ordinal),0) n FROM orchestration_v2_projection_turn_items WHERE thread_id=?").get(plan.threadId) as { n: number }).n;
   const emit = (row: PlannedEvent, type: string, payload: Json, suffix = ""): V2Event => {
@@ -190,7 +197,7 @@ export function v2Events(db: Database.Database, plan: PlannedThread): Json[] {
     if (existing.length === 0) {
       // Mirrors thread.create.importedNativeThread: a durable native ref, no
       // fabricated runtime session and no historical provider execution.
-      const nativeId = plan.thread.source === "codex" ? plan.thread.resumeCursor.threadId : plan.thread.resumeCursor.resume;
+      const nativeId = nativeSessionId(plan.thread);
       if (typeof nativeId !== "string" || !nativeId) throw safetyError("The source has no native provider thread ID.");
       const id = deterministicUuid(`t3-import:v2:provider-thread:${plan.threadId}:${plan.provider.instanceId}:${nativeId}`);
       const ref = { driver: plan.provider.adapterKey, nativeId, strength: "strong" };
@@ -200,22 +207,22 @@ export function v2Events(db: Database.Database, plan: PlannedThread): Json[] {
         payload: { id, driver: plan.provider.adapterKey, providerInstanceId: plan.provider.instanceId,
           providerSessionId: null, appThreadId: plan.threadId, ownerNodeId: null,
           nativeThreadRef: ref,
-          nativeConversationHeadRef: plan.thread.source === "claude" && plan.thread.resumeCursor.resumeSessionAt
-            ? { driver: plan.provider.adapterKey, nativeId: plan.thread.resumeCursor.resumeSessionAt, strength: "weak" } : null,
+          nativeConversationHeadRef: head
+            ? { driver: plan.provider.adapterKey, nativeId: head, strength: "weak" } : null,
           status: "not_loaded",
           firstRunOrdinal: null, lastRunOrdinal: null, handoffIds: [], forkedFrom: null,
           createdAt: plan.thread.createdAt, updatedAt: plan.thread.updatedAt },
       });
-    } else if (plan.thread.source === "claude") {
+    } else if (plan.thread.source === "claude" || plan.thread.source === "opencode") {
       const current = existing.find((row) => row.id === storedThread?.activeProviderThreadId) ?? (existing.length === 1 ? existing[0] : undefined);
       const ref = current && isObject(current.nativeThreadRef) ? current.nativeThreadRef : undefined;
-      if (!current || ref?.driver !== plan.provider.adapterKey || ref.nativeId !== plan.thread.sourceSessionId) throw safetyError("Cannot update an ambiguous or rebound V2 Claude provider thread.");
+      if (!current || ref?.driver !== plan.provider.adapterKey || ref.nativeId !== plan.thread.sourceSessionId) throw safetyError("Cannot update an ambiguous or rebound V2 provider thread.");
       const previousHead = isObject(current.nativeConversationHeadRef) ? current.nativeConversationHeadRef.nativeId : undefined;
-      if (previousHead !== plan.thread.resumeCursor.resumeSessionAt) events.push({ id: deterministicUuid(`t3-import:head:${plan.threadId}:${plan.thread.resumeCursor.resumeSessionAt ?? plan.fingerprint}`),
+      if (previousHead !== head) events.push({ id: deterministicUuid(`t3-import:head:${plan.threadId}:${head ?? plan.fingerprint}`),
         threadId: plan.threadId, type: "provider-thread.updated", occurredAt: plan.thread.updatedAt,
         driver: plan.provider.adapterKey, providerInstanceId: plan.provider.instanceId,
-        payload: { ...current, nativeConversationHeadRef: plan.thread.resumeCursor.resumeSessionAt
-          ? { driver: plan.provider.adapterKey, nativeId: plan.thread.resumeCursor.resumeSessionAt, strength: "weak" } : null,
+        payload: { ...current, nativeConversationHeadRef: head
+          ? { driver: plan.provider.adapterKey, nativeId: head, strength: "weak" } : null,
           updatedAt: plan.thread.updatedAt },
       });
     }
@@ -230,7 +237,7 @@ export function v2Events(db: Database.Database, plan: PlannedThread): Json[] {
 }
 
 export async function prepareV2Write(db: Database.Database, plans: PlannedThread[]): Promise<{ write(): Promise<Map<PlannedThread, { first: number; last: number }>> }> {
-  const module = await runtime();
+  const module = await runtime(db);
   const batches = plans.map((plan) => {
     const events = v2Events(db, plan);
     plan.targetEventCount = events.length;

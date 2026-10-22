@@ -8,7 +8,7 @@ import { resolveTargetPaths } from "../src/target/config.js";
 export function createTarget(root: string, migration = 40): TargetPaths {
   const schemas = JSON.parse(readFileSync(new URL("./fixtures/t3-schemas.json", import.meta.url), "utf8")) as Record<string, { ddl: string[]; migrations: Array<Record<string, string | number>> }>;
   const schema = schemas[String(migration)] ?? schemas["40"]!;
-  const paths = resolveTargetPaths({ t3Home: root, ...(migration === 62 ? { dbPath: join(root, "userdata/statev2.sqlite") } : {}) });
+  const paths = resolveTargetPaths({ t3Home: root, ...(migration >= 62 ? { dbPath: join(root, "userdata/statev2.sqlite") } : {}) });
   mkdirSync(paths.stateDir, { recursive: true });
   const db = new Database(paths.dbPath);
   try {

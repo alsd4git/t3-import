@@ -1,8 +1,33 @@
 # T3 compatibility validation
 
-The importer supports V1 database migrations 40–54 and T3 0.1.0 V2 migration 62 explicitly. A supported number
+The importer supports V1 database migrations 40–54 and T3 V2 migrations 62 and 67 explicitly. A supported number
 must also pass integrity and required-column checks. This is not a promise that
 every future T3 commit retaining the same migration number will remain compatible.
+
+## T3 0.1.1 / migration 67
+
+The separate profile pins `v0.1.1` to
+`fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92`. Its runtime lives in
+`vendor/t3-v011`, with Effect 4.0.5 installed under the `effect-v011` package
+alias. The 0.1.0 runtime retains Effect 4.0.4; both profiles run in the same
+integration suite. Selection uses the validated database migration, never the
+installed app's display version alone.
+
+Migration 63 drops unused V1 projections including `projection_state`. V2
+validation uses its own full column manifest and migration names through 67;
+V1 still requires its replay cursors. Intermediate migrations 63–66 remain
+unsupported. New schema generation and vendoring are explicit development steps:
+
+```text
+node scripts/v2/build-runtime.mjs 0.1.1
+npm run compat:v2-schema
+```
+
+OpenCode 2.x imports carry a strong native session reference and a weak user
+message head reference. Terminal user IDs and exact visible content/status are
+checked before native history is adopted. No reverse transcript writer is
+implemented. See [the implementation validation](v011-opencode-validation.md)
+for the real-data copy test, package checks and provider-continuation limits.
 
 ## T3 0.1.0 / Orchestrator V2
 

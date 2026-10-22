@@ -1,4 +1,5 @@
-export type SourceName = "codex" | "claude";
+import type { sourceNames } from "./providers.js";
+export type SourceName = typeof sourceNames[number];
 export type ActivityTone = "info" | "tool" | "approval" | "error";
 export type CanonicalTurnStatus = "completed" | "interrupted" | "failed" | "inProgress";
 export type CanonicalTerminalTurnStatus = Exclude<CanonicalTurnStatus, "inProgress">;
@@ -72,6 +73,7 @@ export interface CanonicalThread {
   workspace: string;
   gitBranch?: string;
   model: string;
+  modelOptions?: Array<{ id: string; value: string | boolean }>;
   effort?: string;
   createdAt: string;
   updatedAt: string;

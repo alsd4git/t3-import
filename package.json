@@ -1,6 +1,6 @@
 {
   "name": "@carlosgtrz/t3-import",
-  "version": "0.5.0-v2.0",
+  "version": "0.5.0-v2.1",
   "description": "Import, synchronize, and safely replace Codex and Claude Code conversations in T3 Code",
   "keywords": [
     "t3code",
@@ -30,6 +30,7 @@
   "files": [
     "dist",
     "vendor/t3-v010",
+    "vendor/t3-v011",
     "README.md",
     "LICENSE"
   ],
@@ -58,6 +59,7 @@
     "better-sqlite3": "^12.2.0",
     "commander": "^14.0.0",
     "effect": "4.0.4",
+    "effect-v011": "npm:effect@4.0.5",
     "env-paths": "^3.0.0",
     "ink": "^6.2.3",
     "react": "^19.1.1",

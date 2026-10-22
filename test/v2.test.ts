@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { beforeEach, afterEach, it, expect } from "vitest";
+import { beforeEach, afterEach, describe, it, expect } from "vitest";
 import { canonicalConversation, createTarget, eventCount } from "./helpers.js";
 import { importConversations } from "../src/target/importer.js";
 import { inspectConversationSync, syncConversations } from "../src/target/sync.js";
@@ -11,6 +11,7 @@ import { replaceConversations } from "../src/target/replace.js";
 import { syncAllLinkedConversations } from "../src/target/syncAll.js";
 import type { CanonicalConversation, SourceName } from "../src/core/types.js";
 
+describe.each([62, 67])("V2 migration %i", (migration) => {
 let root: string;
 let ledger: string | undefined;
 beforeEach(() => {
@@ -25,7 +26,7 @@ afterEach(() => {
 });
 
 it("prefers V2 and projects a resumable import through the official sink", async () => {
-  const paths = createTarget(root, 62);
+  const paths = createTarget(root, migration);
   expect(resolveTargetPaths({ t3Home: root }).dbPath).toBe(paths.dbPath);
   const conversation = canonicalConversation(root);
   const result = await importConversations([{ conversation, resume: true }], paths, { dryRun: false, resume: true });
@@ -50,7 +51,7 @@ it("prefers V2 and projects a resumable import through the official sink", async
 });
 
 it.each(["failed", "interrupted"] as const)("keeps %s imported turns visible as notices", async (status) => {
-  const paths = createTarget(root, 62);
+  const paths = createTarget(root, migration);
   const conversation = canonicalConversation(root);
   conversation.threads[0]!.turns[0]!.status = status;
   if (status === "failed") conversation.threads[0]!.turns[0]!.terminalError = "Provider failed";
@@ -67,7 +68,7 @@ it.each(["failed", "interrupted"] as const)("keeps %s imported turns visible as 
 });
 
 it("rolls back official event/projection writes and removes staged attachments on failure", async () => {
-  const paths = createTarget(root, 62);
+  const paths = createTarget(root, migration);
   const conversation = canonicalConversation(root);
   conversation.threads[0]!.turns[0]!.user.attachments.push({ sourceId: "image", name: "image.png", mimeType: "image/png", sizeBytes: 3, data: Buffer.from("png") });
   const db = new Database(paths.dbPath);
@@ -98,8 +99,8 @@ function addTurn(conversation: CanonicalConversation): void {
   conversation.fingerprint = `fingerprint-${index}`;
 }
 
-it.each(["codex", "claude"] as SourceName[])("syncs and replaces %s with ledger recovery and stable cwd", async (source) => {
-  const paths = createTarget(root, 62);
+it.each(["codex", "claude", "opencode"] as SourceName[])("syncs and replaces %s with ledger recovery and stable cwd", async (source) => {
+  const paths = createTarget(root, migration);
   const conversation = canonicalConversation(root);
   const thread = conversation.threads[0]!;
   if (source === "claude") {
@@ -109,14 +110,27 @@ it.each(["codex", "claude"] as SourceName[])("syncs and replaces %s with ledger 
     thread.leafId = "leaf-1";
     conversation.summary.source = source;
   }
+  if (source === "opencode") {
+    thread.source = source;
+    thread.sourceKey = `opencode:${thread.sourceSessionId}`;
+    thread.resumeCursor = { sessionId: thread.sourceSessionId, headMessageId: thread.turns[0]!.id };
+    thread.modelOptions = [{ id: "variant", value: "high" }];
+    conversation.summary.source = source;
+  }
   const first = await importConversations([{ conversation, resume: true }], paths, { dryRun: false, resume: true });
   process.env.T3_IMPORT_DATA_DIR = join(root, "recovered-ledger");
   addTurn(conversation);
   if (source === "claude") thread.resumeCursor = { resume: thread.sourceSessionId, resumeSessionAt: "leaf-2" };
+  if (source === "opencode") thread.resumeCursor = { sessionId: thread.sourceSessionId, headMessageId: thread.turns.at(-1)!.id };
   const sync = await syncConversations([{ conversation }], paths, { dryRun: false });
   expect(sync.results[0]).toMatchObject({ turnsAdded: 1, threadId: first.results[0]!.threadId });
   expect(sync.status).toBe("synced");
   expect((await syncConversations([{ conversation }], paths, { dryRun: false })).status).toBe("up-to-date");
+  if (source === "opencode") {
+    const all = await syncAllLinkedConversations({ name: source, discover: async () => [conversation.summary], load: async () => conversation }, paths, { dryRun: false });
+    expect(all.status).toBe("up-to-date");
+    expect(all.results).toHaveLength(1);
+  }
   const replacement = await replaceConversations([{ conversation }], paths, { dryRun: false });
   expect(replacement.status).toBe("replaced");
   expect(replacement.results[0]!.resumeTransferred).toBe(true);
@@ -129,13 +143,14 @@ it.each(["codex", "claude"] as SourceName[])("syncs and replaces %s with ledger 
     const payload = JSON.parse(provider.payload);
     expect(payload.nativeThreadRef.nativeId).toBe(thread.sourceSessionId);
     if (source === "claude") expect(payload.nativeConversationHeadRef.nativeId).toBe("leaf-2");
+    if (source === "opencode") expect(payload.nativeConversationHeadRef.nativeId).toBe(thread.turns.at(-1)!.id);
     expect(db.pragma("integrity_check", { simple: true })).toBe("ok");
     expect(db.pragma("foreign_key_check")).toEqual([]);
   } finally { db.close(); }
 });
 
 it("keeps a V2 dry run read-only, including a missing ledger", async () => {
-  const paths = createTarget(root, 62);
+  const paths = createTarget(root, migration);
   const before = readFileSync(paths.dbPath);
   const result = await importConversations([{ conversation: canonicalConversation(root), resume: true }], paths, { dryRun: true, resume: true });
   expect(result.status).toBe("dry-run");
@@ -145,7 +160,7 @@ it("keeps a V2 dry run read-only, including a missing ledger", async () => {
 });
 
 it("refuses an unprojected V2 event backlog without creating a backup or ledger", async () => {
-  const paths = createTarget(root, 62);
+  const paths = createTarget(root, migration);
   const db = new Database(paths.dbPath);
   db.prepare("INSERT INTO orchestration_events (event_id,aggregate_kind,stream_id,stream_version,event_type,occurred_at,actor_kind,payload_json,metadata_json,application_event_version) VALUES ('orphan','thread','unprojected',0,'thread.created','2026-01-01T00:00:00.000Z','server','{}','{}',2)").run();
   db.close();
@@ -156,12 +171,19 @@ it("refuses an unprojected V2 event backlog without creating a backup or ledger"
 });
 
 async function officialRuntime(): Promise<any> {
-  return import(new URL("../vendor/t3-v010/runtime.mjs", import.meta.url).href);
+  return import(new URL(`../vendor/${migration === 62 ? "t3-v010" : "t3-v011"}/runtime.mjs`, import.meta.url).href);
 }
 
-it("adopts exact native V2 turns and rejects a changed transcript", async () => {
-  const paths = createTarget(root, 62);
+it.each(["codex", "opencode"] as const)("adopts exact native V2 %s turns and rejects a changed transcript", async (source) => {
+  const paths = createTarget(root, migration);
   const conversation = canonicalConversation(root);
+  if (source === "opencode") {
+    const thread = conversation.threads[0]!;
+    thread.source = source;
+    thread.sourceKey = `opencode:${thread.sourceSessionId}`;
+    thread.resumeCursor = { sessionId: thread.sourceSessionId };
+    conversation.summary.source = source;
+  }
   const result = await importConversations([{ conversation, resume: true }], paths, { dryRun: false, resume: true });
   const threadId = result.results[0]!.threadId!;
   const db = new Database(paths.dbPath);
@@ -178,7 +200,7 @@ it("adopts exact native V2 turns and rejects a changed transcript", async () => 
       payload: { ...item, providerThreadId: provider.id, providerTurnId: "v2-turn-1" } })),
     { id: "native-terminal", threadId, type: "provider-turn.updated", occurredAt: conversation.threads[0]!.updatedAt,
       payload: { id: "v2-turn-1", providerThreadId: provider.id, nodeId: "native-node", runAttemptId: null,
-        nativeTurnRef: { driver: "codex", nativeId: "turn-1", strength: "strong" }, ordinal: 1, status: "completed",
+        nativeTurnRef: { driver: source, nativeId: "turn-1", strength: source === "codex" ? "strong" : "weak" }, ordinal: 1, status: "completed",
         startedAt: conversation.threads[0]!.createdAt, completedAt: conversation.threads[0]!.updatedAt } },
   ]);
   addTurn(conversation);
@@ -228,7 +250,7 @@ it("migrates an existing V1 import without reimporting its transcript", async ()
 });
 
 it("preserves local titles and refuses a rebound native session", async () => {
-  const paths = createTarget(root, 62);
+  const paths = createTarget(root, migration);
   const conversation = canonicalConversation(root);
   const first = await importConversations([{ conversation, resume: true }], paths, { dryRun: false, resume: true });
   const threadId = first.results[0]!.threadId!;
@@ -250,7 +272,7 @@ it("preserves local titles and refuses a rebound native session", async () => {
 });
 
 it("refuses pending legacy hydration and queued V2 runs", async () => {
-  const paths = createTarget(root, 62);
+  const paths = createTarget(root, migration);
   const conversation = canonicalConversation(root);
   const first = await importConversations([{ conversation, resume: true }], paths, { dryRun: false, resume: true });
   const threadId = first.results[0]!.threadId!;
@@ -277,7 +299,7 @@ it("refuses pending legacy hydration and queued V2 runs", async () => {
 });
 
 it("preserves a native scratch cwd through V2 sync and replacement", async () => {
-  const paths = createTarget(root, 62);
+  const paths = createTarget(root, migration);
   const scratch = join(root, "scratch", "existing-thread");
   mkdirSync(scratch, { recursive: true });
   writeFileSync(join(scratch, "keep.txt"), "user data");
@@ -295,8 +317,8 @@ it("preserves a native scratch cwd through V2 sync and replacement", async () =>
   expect(readFileSync(join(scratch, "keep.txt"), "utf8")).toBe("user data");
 });
 
-it("adopts a native continuation and appends external history after its run positions", async () => {
-  const paths = createTarget(root, 62);
+it.each(["codex", "opencode"] as const)("adopts a native %s continuation and appends external history after its run positions", async (source) => {
+  const paths = createTarget(root, migration);
   const conversation = canonicalConversation(root);
   const imported = await importConversations([{ conversation, resume: true }], paths, { dryRun: false, resume: true });
   const threadId = imported.results[0]!.threadId!;
@@ -331,7 +353,7 @@ it("adopts a native continuation and appends external history after its run posi
     }),
     { id: "native-turn-2-event", threadId, type: "provider-turn.updated", occurredAt: turn.completedAt,
       payload: { id: "native-turn-2", providerThreadId: provider.id, nodeId: "native-node-2", runAttemptId: null,
-        nativeTurnRef: { driver: "codex", nativeId: turn.id, strength: "strong" }, ordinal: 1, status: "completed",
+        nativeTurnRef: { driver: source, nativeId: turn.id, strength: source === "codex" ? "strong" : "weak" }, ordinal: 1, status: "completed",
         startedAt: turn.startedAt, completedAt: turn.completedAt } },
   ];
   await runtime.writeEvents(paths.dbPath, events);
@@ -349,7 +371,7 @@ it("adopts a native continuation and appends external history after its run posi
 });
 
 it("keeps native provider-managed subagents outside writable synchronization", async () => {
-  const paths = createTarget(root, 62);
+  const paths = createTarget(root, migration);
   const conversation = canonicalConversation(root);
   const first = await importConversations([{ conversation, resume: true }], paths, { dryRun: false, resume: true });
   const threadId = first.results[0]!.threadId!;
@@ -365,4 +387,6 @@ it("keeps native provider-managed subagents outside writable synchronization", a
   const all = await syncAllLinkedConversations({ name: "codex", discover: async () => [conversation.summary], load: async () => conversation }, paths, { dryRun: false });
   expect(all.results).toEqual([]);
   expect(eventCount(paths.dbPath)).toBe(before);
+});
+
 });

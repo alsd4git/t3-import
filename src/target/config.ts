@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import type { SourceName, TargetPaths } from "../core/types.js";
 import { isObject, stringValue } from "../core/util.js";
+import { sourceDriver, type ProviderDriver } from "../core/providers.js";
 
 export interface TargetOverrides {
   t3Home?: string;
@@ -30,8 +31,8 @@ export function resolveTargetPaths(overrides: TargetOverrides = {}): TargetPaths
 
 export interface ProviderSelection {
   instanceId: string;
-  providerName: "codex" | "claudeAgent";
-  adapterKey: "codex" | "claudeAgent";
+  providerName: ProviderDriver;
+  adapterKey: ProviderDriver;
   model: string;
   options: Array<{ id: string; value: string | boolean }>;
   warning?: string;
@@ -55,7 +56,7 @@ function configuredInstances(paths: TargetPaths): Map<string, string> {
 }
 
 export function listProviderInstances(paths: TargetPaths, source: SourceName): string[] {
-  const driver = source === "codex" ? "codex" : "claudeAgent";
+  const driver = sourceDriver(source);
   const configured = [...configuredInstances(paths)].filter(([, value]) => value === driver).map(([id]) => id);
   return [...new Set([driver, ...configured])];
 }
@@ -82,8 +83,9 @@ export function resolveProviderSelection(
   requestedModel: string,
   effort: string | undefined,
   overrideInstance?: string,
+  modelOptions: ProviderSelection["options"] = [],
 ): ProviderSelection {
-  const providerName = source === "codex" ? "codex" : "claudeAgent";
+  const providerName = sourceDriver(source);
   const instanceId = overrideInstance ?? providerName;
   const models = cacheModels(paths, instanceId);
   const requested = requestedModel && requestedModel !== "default" ? requestedModel : undefined;
@@ -97,6 +99,7 @@ export function resolveProviderSelection(
     adapterKey: providerName,
     model,
     options: [
+      ...modelOptions,
       ...(effort ? [{ id: "reasoningEffort", value: effort }] : []),
       ...(source === "codex" ? [{ id: "serviceTier", value: "default" }] : []),
     ],

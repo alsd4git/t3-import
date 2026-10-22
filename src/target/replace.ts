@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import type { ProviderDriver } from "../core/providers.js";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import type {
@@ -39,9 +40,9 @@ export interface ReplaceOptions extends TargetOverrides {
 }
 
 interface RuntimeRow {
-  providerName: "codex" | "claudeAgent";
+  providerName: ProviderDriver;
   instanceId: string;
-  adapterKey: "codex" | "claudeAgent";
+  adapterKey: ProviderDriver;
   runtimeMode: string;
   status: string;
   lastSeenAt: string;

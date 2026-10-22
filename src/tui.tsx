@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import Database from "better-sqlite3";
 import { Box, Text, useApp, useInput } from "ink";
 import type {
   CanonicalConversation,
@@ -15,7 +16,6 @@ import type {
   TargetPaths,
 } from "./core/types.js";
 import { sourceAdapter } from "./sources/index.js";
-import { inferCurrentWorkspace } from "./sources/codex.js";
 import { compactThreadForImport, importConversations } from "./target/importer.js";
 import { inspectConversationSync, syncConversations } from "./target/sync.js";
 import { listProviderInstances } from "./target/config.js";
@@ -23,8 +23,49 @@ import { inspectRuntime, type RuntimeState } from "./target/schema.js";
 import { launchT3Code } from "./target/launch.js";
 import { resetT3RebuildableCache } from "./target/cache.js";
 import { inspectConversationReplacement, replaceConversations } from "./target/replace.js";
+import { importDestination, type DestinationOptions } from "./target/destination.js";
+import { sourceNames } from "./core/providers.js";
+import { canonicalPath } from "./core/util.js";
 
-export type Screen = "preflight" | "blocked" | "source" | "workspace" | "provider" | "threads" | "review" | "running" | "result" | "launching" | "launch-error" | "error";
+export type Screen = "preflight" | "blocked" | "source" | "workspace" | "provider" | "threads" | "destination" | "review" | "running" | "result" | "launching" | "launch-error" | "error";
+
+export interface TuiDestinationChoice {
+  label: string;
+  options?: DestinationOptions;
+}
+
+export function sourceLabel(source: SourceName): string {
+  if (source === "codex") return "Codex";
+  if (source === "claude") return "Claude Code";
+  return "OpenCode";
+}
+
+/** Only offer destinations that the importer's canonical policy accepts. */
+export function discoverTuiDestinations(paths: TargetPaths, workspace: string): TuiDestinationChoice[] {
+  const db = new Database(paths.dbPath, { readonly: true, fileMustExist: true });
+  try {
+    const rows = db.prepare("SELECT project_id projectId, title, workspace_root workspaceRoot FROM projection_projects WHERE deleted_at IS NULL ORDER BY title COLLATE NOCASE, project_id").all() as Array<{ projectId: string; title: string; workspaceRoot: string }>;
+    const matching = rows.filter((row) => canonicalPath(row.workspaceRoot) === canonicalPath(workspace));
+    const choices: TuiDestinationChoice[] = [{ label: matching.length ? "Use the matching workspace project (default)" : "Create or use the workspace project (default)" }];
+    for (const row of matching) {
+      try {
+        importDestination(db, paths, workspace, { targetProject: row.projectId });
+        choices.push({ label: `${row.title} · ${row.workspaceRoot}`, options: { targetProject: row.projectId } });
+      } catch {
+        // A project that fails the importer's destination invariant is not selectable.
+      }
+    }
+    try {
+      importDestination(db, paths, workspace, { noProject: true });
+      choices.push({ label: "No project (T3 scratch)", options: { noProject: true } });
+    } catch {
+      // Native scratch is only offered when the canonical policy permits it.
+    }
+    return choices;
+  } finally {
+    db.close();
+  }
+}
 
 export function escapeDestination(screen: Screen, history: Screen[]): Screen | undefined {
   if (["source", "blocked", "result", "launch-error", "error"].includes(screen)) return undefined;
@@ -43,7 +84,7 @@ interface TuiProps {
 export function helpTextForScreen(screen: Screen, searching = false): string | undefined {
   if (searching) return "Type to search  Backspace delete  Enter apply  Esc cancel";
   if (screen === "threads") return "↑/↓ or j/k move  Space select  a all  / search  Enter continue  Esc back/quit  q quit";
-  if (screen === "source" || screen === "workspace" || screen === "provider") return "↑/↓ or j/k move  Enter choose  Esc back/quit  q quit";
+  if (screen === "source" || screen === "workspace" || screen === "provider" || screen === "destination") return "↑/↓ or j/k move  Enter choose  Esc back/quit  q quit";
   if (screen === "review") return "Enter confirm  Esc back  q quit";
   if (screen === "result") return "↑/↓ or j/k move  Enter confirm  q quit";
   return undefined;
@@ -158,6 +199,9 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
   const [summaries, setSummaries] = useState<SourceSummary[]>([]);
   const [workspace, setWorkspace] = useState<string>();
   const [provider, setProvider] = useState<string | undefined>(initialProvider);
+  const [destinationChoices, setDestinationChoices] = useState<TuiDestinationChoice[]>([]);
+  const [destinationError, setDestinationError] = useState<string>();
+  const [destinationOptions, setDestinationOptions] = useState<DestinationOptions>({});
   const [index, setIndex] = useState(0);
   const [selected, setSelected] = useState(new Set<string>());
   const [conversations, setConversations] = useState(new Map<string, CanonicalConversation>());
@@ -257,20 +301,22 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
 
   useEffect(() => {
     if (screen !== "workspace") return;
+    let cancelled = false;
     setIndex(0);
     sourceAdapter(source).discover({}).then((items) => {
+      if (cancelled) return;
       setSummaries(items);
       const selectedWorkspace = initialWorkspace
         ? items.find((item) => item.workspace.toLowerCase() === initialWorkspace.toLowerCase())?.workspace
-        : inferCurrentWorkspace(items);
+        : undefined;
       if (selectedWorkspace) {
         setWorkspace(selectedWorkspace);
         setProvider(initialProvider ?? providers[0]);
-        // Workspace inference bypasses the workspace option screen, so it is
-        // deliberately not added to navigation history.
+        // An explicit --workspace bypasses the chooser and its navigation history.
         setScreen("threads");
       }
-    }).catch((cause) => { setError(cause instanceof Error ? cause.message : String(cause)); setScreen("error"); });
+    }).catch((cause) => { if (!cancelled) { setError(cause instanceof Error ? cause.message : String(cause)); setScreen("error"); } });
+    return () => { cancelled = true; };
   }, [screen, source]);
 
   useEffect(() => {
@@ -312,6 +358,19 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
     return () => { cancelled = true; };
   }, [mode, paths, screen, source, workspace]);
 
+  useEffect(() => {
+    if (screen !== "destination" || !workspace) return;
+    try {
+      setDestinationChoices(discoverTuiDestinations(paths, workspace));
+      setDestinationError(undefined);
+      setDestinationOptions({});
+      setIndex(0);
+    } catch (cause) {
+      setDestinationError(cause instanceof Error ? cause.message : String(cause));
+      setDestinationChoices([]);
+    }
+  }, [paths, screen, workspace]);
+
   const move = (delta: number, length: number) => setIndex((current) => length === 0 ? 0 : (current + delta + length) % length);
   useInput((input, key) => {
     if (screen === "running") return;
@@ -324,11 +383,11 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
     if (input === "q") { app.exit(); return; }
     if (screen === "blocked" && (input === "r" || key.return)) { checkRuntime(); return; }
     if (key.upArrow || input === "k") {
-      move(-1, screen === "source" || screen === "result" ? 2 : screen === "workspace" ? workspaces.length : screen === "provider" ? providers.length : visibleThreads.length);
+      move(-1, screen === "source" ? sourceNames.length : screen === "result" ? 2 : screen === "workspace" ? workspaces.length : screen === "provider" ? providers.length : screen === "destination" ? destinationChoices.length : visibleThreads.length);
       return;
     }
     if (key.downArrow || input === "j") {
-      move(1, screen === "source" || screen === "result" ? 2 : screen === "workspace" ? workspaces.length : screen === "provider" ? providers.length : visibleThreads.length);
+      move(1, screen === "source" ? sourceNames.length : screen === "result" ? 2 : screen === "workspace" ? workspaces.length : screen === "provider" ? providers.length : screen === "destination" ? destinationChoices.length : visibleThreads.length);
       return;
     }
     if (key.escape) {
@@ -341,13 +400,16 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
       return;
     }
     if (screen === "source" && key.return) {
-      setSource(index === 0 ? "codex" : "claude"); setSelected(new Set()); setPreparedImports([]); setPreparedSync([]); setPreparedReplacements([]); navigate("workspace"); return;
+      setSource(sourceNames[index]!); setSelected(new Set()); setPreparedImports([]); setPreparedSync([]); setPreparedReplacements([]); navigate("workspace"); return;
     }
     if (screen === "workspace" && key.return && workspaces[index]) {
       setWorkspace(workspaces[index]); setProvider(initialProvider ?? providers[0]); navigate("threads"); return;
     }
     if (screen === "provider" && key.return && providers[index]) {
-      setProvider(providers[index]); navigate(preparedImports.length ? "review" : "threads"); return;
+      setProvider(providers[index]); navigate(preparedImports.length ? "destination" : "threads"); return;
+    }
+    if (screen === "destination" && key.return && destinationChoices[index]) {
+      setDestinationOptions(destinationChoices[index]!.options ?? {}); navigate("review"); return;
     }
     if (screen === "threads") {
       if (input === "/") { setSearching(true); return; }
@@ -378,7 +440,10 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
           else if (preview?.status === "syncable") syncs.push({ conversation });
         }
         setPreparedImports(imports); setPreparedSync(syncs); setPreparedReplacements(replacements);
-        navigate(imports.length > 0 && !initialProvider && providers.length > 1 ? "provider" : "review");
+        if (imports.length > 0) {
+          setDestinationOptions({});
+          navigate(!initialProvider && providers.length > 1 ? "provider" : "destination");
+        } else navigate("review");
         return;
       }
     }
@@ -386,7 +451,7 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
       setScreen("running");
       const run = async () => {
         const imported = preparedImports.length
-          ? await importConversations(preparedImports, paths, { dryRun: false, resume: true, ...(provider ? { providerInstance: provider } : {}) })
+          ? await importConversations(preparedImports, paths, { dryRun: false, resume: true, ...(provider ? { providerInstance: provider } : {}), ...destinationOptions })
           : undefined;
         const synced = preparedSync.length
           ? await syncConversations(preparedSync, paths, { dryRun: false, allowProjectionBacklog: Boolean(imported?.results.some((item) => item.status === "imported")) })
@@ -428,9 +493,10 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
     <Box marginTop={1} flexDirection="column">
       {screen === "preflight" && <Text>Checking whether T3 is running…</Text>}
       {screen === "blocked" && <><Text bold color="red">T3 is running</Text><Text>Close T3 before importing, syncing, or replacing{runtime?.pid ? ` (detected PID ${runtime.pid})` : ""}.</Text>{runtime?.origin ? <Text dimColor>Runtime: {runtime.origin}</Text> : null}<Text>Press r or Enter to check again, or q to quit.</Text></>}
-      {screen === "source" && <><Text bold>Choose a source</Text><Menu items={["Codex", "Claude Code"]} index={index} /></>}
+      {screen === "source" && <><Text bold>Choose a source</Text><Menu items={sourceNames.map(sourceLabel)} index={index} /></>}
       {screen === "workspace" && <><Text bold>Choose a workspace</Text>{summaries.length === 0 ? <Text>Discovering {source} conversations…</Text> : <Menu items={workspaces} index={index} />}</>}
       {screen === "provider" && <><Text bold>Choose a T3 provider instance</Text><Menu items={providers} index={index} /></>}
+      {screen === "destination" && <><Text bold>Choose a T3 destination for new imports</Text><Text dimColor>Available choices preserve the source working directory.</Text>{destinationError ? <Text color="red">{destinationError}</Text> : destinationChoices.length ? <Menu items={destinationChoices.map((choice) => choice.label)} index={index} /> : <Text>Checking available destinations…</Text>}</>}
       {screen === "threads" && <>
         <Text bold>{mode === "sync" ? "Select conversations to sync" : mode === "replace" ? "Select conversations to replace" : "Select conversations"} — {workspace}</Text>
         {searching || query ? <Text color="yellow">Search: {query}<Text dimColor>_</Text></Text> : null}
@@ -453,6 +519,7 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
         </> : <>
           <Text bold>Review changes</Text>
           <Text>Source: {source} · Workspace: {workspace}</Text>
+          {preparedImports.length ? <><Text>Source working directory: {workspace}</Text><Text>Effective T3 working directory: {workspace}</Text><Text>Destination: {destinationChoices.find((choice) => JSON.stringify(choice.options ?? {}) === JSON.stringify(destinationOptions))?.label ?? "Use workspace project automatically"}</Text></> : null}
           <Text>New tasks: {importPreview.tasks} · synchronized tasks: {syncPreview.tasks}</Text>
           <Text>Imported turns: {importPreview.turns} · added turns: {syncPreview.turns} · adopted turns: {syncPreview.adopted}</Text>
           <Text>Messages: {importPreview.messages} · activities: {importPreview.activities} · attachments: {importPreview.attachments}</Text>
