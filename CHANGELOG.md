@@ -1,10 +1,12 @@
 # Changelog
 
-## 0.5.0-fork.1
+## 0.1.1-alsd.1
 
 First release from the maintained `alsd4git/t3-import` fork. Package name:
-`@alsd4git/t3-import`; executable: `t3-import`. Distributed through GitHub Releases,
-without an npm registry publication.
+`@alsd4git/t3-import`; executable: `t3-import`. Version numbers follow the latest
+supported T3 release plus an independent
+fork revision. GitHub releases provide a tarball; npm publication uses the
+default `latest` channel.
 
 - Support T3 V1 migrations 40–54 and pinned T3 0.1.0/0.1.1 V2 migrations 62/67.
 - Import and sync OpenCode 2.x sessions into T3, preserving native session identity,

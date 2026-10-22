@@ -42,9 +42,19 @@ issue and installation links without rewriting historical validation reports.
 4. Create an annotated version tag and a GitHub prerelease containing the tarball,
    checksum and relevant changelog notes. Do not move published tags.
 5. Verify the downloadable artifact matches the local checksum. Keep npm
-   publication a separate explicit action; a GitHub release does not publish npm.
+   publication an explicitly authorized action; a GitHub release does not publish npm.
+6. When npm publication is authorized, authenticate an account allowed to publish
+   `@alsd4git/t3-import`. Publish the verified tarball with
+   `npm publish <tarball> --access public --tag latest`. The explicit `latest`
+   setting makes the T3-aligned prerelease version the default installation,
+   without requiring `@next`. Verify registry metadata and a clean install.
+   A published npm name/version cannot be reused for different contents.
 
-The first fork version is `0.5.0-fork.1`. The scoped package name is
+Versions use `<T3 version>-alsd.<revision>`, starting at `0.1.1-alsd.1`.
+Increment the suffix for importer changes against the same latest validated T3
+release. Change the T3 portion only after validating that T3 version; continue to
+list earlier supported versions in the compatibility matrix. The scoped package
+name is
 `@alsd4git/t3-import`, while the command, ledger directory, synchronization keys
 and event identities retain `t3-import`. Renaming package metadata must not reset
 the user's synchronization identity or storage.

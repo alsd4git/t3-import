@@ -34,13 +34,23 @@ transcript sync. See [compatibility and validation](docs/compatibility.md).
 ## Install
 
 The fork package is named `@alsd4git/t3-import`; the command remains `t3-import`.
-It is distributed as a GitHub release tarball. It is not yet published on npm.
+Install the scoped npm package, or use the pinned GitHub release tarball below.
 The upstream `@carlosgtrz/t3-import` package does not contain this fork's features.
 
 ```sh
-npm install --global --allow-scripts=better-sqlite3 https://github.com/alsd4git/t3-import/releases/download/v0.5.0-fork.1/alsd4git-t3-import-0.5.0-fork.1.tgz
+npm i -g @alsd4git/t3-import --allow-scripts=better-sqlite3
 t3-import --version
 ```
+
+For a pinned GitHub release without the npm registry:
+
+```sh
+npm i -g --allow-scripts=better-sqlite3 https://github.com/alsd4git/t3-import/releases/download/v0.1.1-alsd.1/alsd4git-t3-import-0.1.1-alsd.1.tgz
+```
+
+Versions follow `<T3 version>-alsd.<revision>`. `0.1.1-alsd.1` targets T3 0.1.1
+and retains the earlier compatibility shown above. npm installs the default
+`latest` channel; no `@next` suffix is required.
 
 The script approval allows the native SQLite dependency to install with recent
 npm versions. Older npm versions may report the option as unknown; their normal
