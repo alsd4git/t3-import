@@ -1,13 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.1.2-alsd.1
 
 - Read Codex `.jsonl.zst` rollouts directly, preserving content fingerprints and
   preferring the matching plain rollout when both coexist.
 - Validate T3 0.1.2 with the pinned official persistence runtime. It shares
   migration 67 and identical schema DDL with 0.1.1; both releases remain covered.
 - Align the npm engine constraint with the documented Node.js 22.21.1+/24+ support.
-
 - Report persisted T3 activity and verified Linux systemd service ownership with
   `runtime status`, including pending runs, approvals, background work and schedules.
 - Offer explicit idle-service maintenance through the TUI or `--manage-runtime`.
