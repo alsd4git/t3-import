@@ -19,7 +19,8 @@ import { sourceAdapter } from "./sources/index.js";
 import { compactThreadForImport, importConversations } from "./target/importer.js";
 import { inspectConversationSync, syncConversations } from "./target/sync.js";
 import { listProviderInstances } from "./target/config.js";
-import { inspectRuntime, type RuntimeState } from "./target/schema.js";
+import { inspectRuntimeStatus, type RuntimeStatus } from "./target/runtimeControl.js";
+import { runtimeActivityText } from "./target/runtimeActivity.js";
 import { launchT3Code } from "./target/launch.js";
 import { resetT3RebuildableCache } from "./target/cache.js";
 import { inspectConversationReplacement, replaceConversations } from "./target/replace.js";
@@ -27,7 +28,7 @@ import { importDestination, type DestinationOptions } from "./target/destination
 import { sourceNames } from "./core/providers.js";
 import { canonicalPath } from "./core/util.js";
 
-export type Screen = "preflight" | "blocked" | "source" | "workspace" | "provider" | "threads" | "destination" | "review" | "running" | "result" | "launching" | "launch-error" | "error";
+export type Screen = "preflight" | "blocked" | "pause-confirm" | "maintenance" | "source" | "workspace" | "provider" | "threads" | "destination" | "review" | "running" | "result" | "launching" | "launch-error" | "error";
 
 export interface TuiDestinationChoice {
   label: string;
@@ -79,6 +80,9 @@ interface TuiProps {
   initialProvider?: string;
   mode?: "auto" | "sync" | "replace";
   resetCache?: boolean;
+  initialManagedService?: string;
+  onPauseRuntime?: () => Promise<string | undefined>;
+  onOperation?: (operation: Promise<void>) => void;
 }
 
 export function helpTextForScreen(screen: Screen, searching = false): string | undefined {
@@ -226,11 +230,13 @@ export function ConversationStatusDetails({ preview, replacement, checking, erro
   </Box>;
 }
 
-export function ImportTui({ paths, initialSource, initialWorkspace, initialProvider, mode = "auto", resetCache = false }: TuiProps): React.JSX.Element {
+export function ImportTui({ paths, initialSource, initialWorkspace, initialProvider, mode = "auto", resetCache = false, initialManagedService, onPauseRuntime, onOperation }: TuiProps): React.JSX.Element {
   const app = useApp();
   const [screen, setScreen] = useState<Screen>("preflight");
   const [screenHistory, setScreenHistory] = useState<Screen[]>([]);
-  const [runtime, setRuntime] = useState<RuntimeState>();
+  const [runtime, setRuntime] = useState<RuntimeStatus>();
+  const [managedService, setManagedService] = useState(initialManagedService);
+  const [maintenanceError, setMaintenanceError] = useState<string>();
   const [source, setSource] = useState<SourceName>(initialSource ?? "codex");
   const [summaries, setSummaries] = useState<SourceSummary[]>([]);
   const [workspace, setWorkspace] = useState<string>();
@@ -336,7 +342,7 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
   const checkRuntime = useCallback(() => {
     setScreenHistory([]);
     setScreen("preflight");
-    inspectRuntime(paths)
+    inspectRuntimeStatus(paths)
       .then((state) => {
         setRuntime(state);
         setScreen(state.live ? "blocked" : initialSource ? "workspace" : "source");
@@ -424,7 +430,7 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
 
   const move = (delta: number, length: number) => setIndex((current) => length === 0 ? 0 : (current + delta + length) % length);
   useInput((input, key) => {
-    if (screen === "running") return;
+    if (screen === "running" || screen === "maintenance") return;
     if (searching) {
       if (key.escape || key.return) setSearching(false);
       else if (key.backspace || key.delete) setQuery((value) => value.slice(0, -1));
@@ -433,6 +439,24 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
     }
     if (input === "q") { app.exit(); return; }
     if (screen === "blocked" && (input === "r" || key.return)) { checkRuntime(); return; }
+    if (screen === "blocked" && input === "s" && runtime?.activity.status === "idle" && runtime.service && onPauseRuntime) {
+      setScreen("pause-confirm"); return;
+    }
+    if (screen === "pause-confirm") {
+      if (key.escape) { setScreen("blocked"); return; }
+      if (key.return && onPauseRuntime) {
+        setScreen("maintenance");
+        onPauseRuntime().then((unit) => {
+          setManagedService(unit);
+          setMaintenanceError(undefined);
+          checkRuntime();
+        }).catch((cause) => {
+          setMaintenanceError(cause instanceof Error ? cause.message : String(cause));
+          setScreen("blocked");
+        });
+      }
+      return;
+    }
     if (key.upArrow || input === "k") {
       move(-1, screen === "source" ? sourceNames.length : screen === "result" ? 2 : screen === "workspace" ? workspaces.length : screen === "provider" ? providers.length : screen === "destination" ? destinationChoices.length : visibleThreads.length);
       return;
@@ -525,9 +549,11 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
         }
         setResult(imported); setSyncResult(synced); setReplaceResult(replaced); setIndex(0); setScreen("result");
       };
-      run().catch((cause) => { setError(cause instanceof Error ? cause.message : String(cause)); setScreen("error"); });
+      const operation = run().catch((cause) => { setError(cause instanceof Error ? cause.message : String(cause)); setScreen("error"); });
+      onOperation?.(operation);
     }
     if (screen === "result" && key.return) {
+      if (managedService) { app.exit(); return; }
       if (index === 1) { app.exit(); return; }
       setScreen("launching");
       launchT3Code().then(() => app.exit()).catch((cause) => {
@@ -541,9 +567,28 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
   return <Box flexDirection="column" paddingX={1}>
     <Text bold color="cyan">t3-import</Text>
     <Text dimColor>Target: {paths.dbPath}</Text>
+    {managedService ? <Text color="yellow">Paused service: {managedService}. It will restart automatically when you exit.</Text> : null}
     <Box marginTop={1} flexDirection="column">
       {screen === "preflight" && <Text>Checking whether T3 is running…</Text>}
-      {screen === "blocked" && <><Text bold color="red">T3 is running</Text><Text>Close T3 before importing, syncing, or replacing{runtime?.pid ? ` (detected PID ${runtime.pid})` : ""}.</Text>{runtime?.origin ? <Text dimColor>Runtime: {runtime.origin}</Text> : null}<Text>Press r or Enter to check again, or q to quit.</Text></>}
+      {screen === "blocked" && <>
+        <Text bold color="red">T3 is running</Text>
+        <Text>Close T3 before importing, syncing, or replacing{runtime?.pid ? ` (detected PID ${runtime.pid})` : ""}.</Text>
+        {runtime?.activity ? <Text>{runtimeActivityText(runtime.activity)}</Text> : null}
+        {runtime?.activity.warnings.map((warning) => <Text key={warning} color="yellow">{warning}</Text>)}
+        {runtime?.service ? <Text>Service: systemd {runtime.service.scope} · {runtime.service.unit}</Text> : <Text dimColor>{runtime?.managementUnavailable}</Text>}
+        {runtime?.origin ? <Text dimColor>Runtime: {runtime.origin}</Text> : null}
+        {maintenanceError ? <Text color="red">{maintenanceError}</Text> : null}
+        {runtime?.activity.status === "idle" && runtime.service && onPauseRuntime ? <Text>Press s to pause the service and continue. It will restart automatically on exit.</Text> : null}
+        <Text>Press r or Enter to check again, or q to quit.</Text>
+      </>}
+      {screen === "pause-confirm" && <>
+        <Text bold>Pause {runtime?.service?.unit} for maintenance?</Text>
+        <Text>T3 and T3 Connect clients will disconnect until this command exits.</Text>
+        <Text>The same systemd unit will restart after success, cancellation, or error.</Text>
+        <Text>Activity is checked again before stopping and before database writes.</Text>
+        <Text>Press Enter to pause, Escape to go back, or q to quit.</Text>
+      </>}
+      {screen === "maintenance" && <Text>Pausing the idle T3 service and verifying that it has stopped…</Text>}
       {screen === "source" && <><Text bold>Choose a source</Text><Menu items={sourceNames.map(sourceLabel)} index={index} /></>}
       {screen === "workspace" && <><Text bold>Choose a workspace</Text>{summaries.length === 0 ? <Text>Discovering {source} conversations…</Text> : <Menu items={workspaces} index={index} />}</>}
       {screen === "provider" && <><Text bold>Choose a T3 provider instance</Text><Menu items={providers} index={index} /></>}
@@ -608,7 +653,7 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
         {replaceResult?.results.map((item) => <Text key={`replace:${item.sourceKey}`}>{item.status === "replaced" ? "✓" : "•"} {item.title} — {item.status}{item.oldThreadId ? `, old ${item.oldThreadId}` : ""}{item.newThreadId ? `, new ${item.newThreadId}` : ""}, {item.turns} turns, {item.events} events</Text>)}
         {(replaceResult?.cache ?? syncResult?.cache ?? result?.cache) ? <Text>Cache backup: {(replaceResult?.cache ?? syncResult?.cache ?? result?.cache)?.backup ?? "cache not found"}</Text> : null}
         {cacheWarning ? <Text color="yellow">{cacheWarning}</Text> : null}
-        <StartT3Prompt index={index} />
+        {managedService ? <Text>Press Enter or q to exit and restore {managedService}.</Text> : <StartT3Prompt index={index} />}
       </>}
       {screen === "launching" && <Text>Starting T3 Code…</Text>}
       {screen === "launch-error" && <><Text bold color="red">Could not start T3 Code</Text><Text>{launchError}</Text><Text dimColor>Press Enter to exit and start it manually.</Text></>}

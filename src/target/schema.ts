@@ -64,10 +64,23 @@ export async function inspectRuntime(paths: TargetPaths): Promise<RuntimeState> 
   }
 }
 
+export function runtimeMaintenancePath(paths: TargetPaths): string {
+  return join(paths.stateDir, ".t3-import-maintenance.json");
+}
+
 export async function assertT3Closed(paths: TargetPaths): Promise<RuntimeState> {
+  const marker = runtimeMaintenancePath(paths);
+  if (existsSync(marker)) {
+    let owner: unknown;
+    try { owner = JSON.parse(readFileSync(marker, "utf8")); } catch { /* Refuse unreadable recovery records. */ }
+    if (!isObject(owner) || owner.ownerPid !== process.pid) throw safetyError(`T3 maintenance is owned by another command or requires recovery. Review ${marker} before writing.`);
+  }
   if (basename(paths.dbPath) === "state.sqlite" && existsSync(join(paths.stateDir, "statev2.sqlite"))) throw safetyError("This home has a V2 database. The legacy state.sqlite is a frozen pre-upgrade copy; select statev2.sqlite instead.");
   const runtime = await inspectRuntime(paths);
-  if (runtime.live) throw safetyError(`T3 is running${runtime.pid ? ` (PID ${runtime.pid})` : ""}. Close T3 before importing.`);
+  if (runtime.live) {
+    const { inspectRuntimeActivity, runtimeActivityText } = await import("./runtimeActivity.js");
+    throw safetyError(`T3 is running${runtime.pid ? ` (PID ${runtime.pid})` : ""}. ${runtimeActivityText(inspectRuntimeActivity(paths))} Close T3 before importing, or use --manage-runtime for a verified idle systemd service.`);
+  }
   return runtime;
 }
 

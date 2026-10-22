@@ -11,6 +11,7 @@ import type { ConversationReplacePreview, ConversationSyncPreview, TargetPaths }
 import { sourceNames } from "../src/core/providers.js";
 import { canonicalConversation, createTarget } from "./helpers.js";
 import { sourceAdapter } from "../src/sources/index.js";
+import * as runtimeControl from "../src/target/runtimeControl.js";
 
 const paths: TargetPaths = {
   t3Home: "C:\\fixture\\.t3",
@@ -42,6 +43,40 @@ async function waitForFrame(
 }
 
 describe("interactive TUI", () => {
+  it.each(["idle", "busy", "unknown"] as const)("offers service maintenance only for verified idle activity (%s)", async (status) => {
+    const inspect = vi.spyOn(runtimeControl, "inspectRuntimeStatus").mockResolvedValue({
+      exists: true, live: true, stale: false, pid: 123,
+      activity: { status, counts: {}, warnings: [], fingerprint: "fixture" },
+      service: { scope: "user", unit: "fixture.service", mainPid: 123, controlGroup: "/fixture.service" },
+    });
+    const pause = vi.fn().mockResolvedValue("fixture.service");
+    const tui = render(<ImportTui paths={paths} onPauseRuntime={pause} />);
+    try {
+      await waitForFrame(tui, "T3 is running");
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      tui.stdin.write("s");
+      if (status === "idle") {
+        await waitForFrame(tui, "Pause fixture.service for maintenance?");
+        expect(pause).not.toHaveBeenCalled();
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        tui.stdin.write("\u001b");
+        await waitForFrame(tui, "Press s to pause");
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        tui.stdin.write("s");
+        await waitForFrame(tui, "Pause fixture.service for maintenance?");
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        inspect.mockResolvedValue({ exists: false, live: false, stale: false, activity: { status: "idle", counts: {}, warnings: [], fingerprint: "fixture" } });
+        tui.stdin.write("\r");
+        await waitForFrame(tui, "Paused service: fixture.service");
+        expect(pause).toHaveBeenCalledOnce();
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(tui.lastFrame()).not.toContain("Pause fixture.service for maintenance?");
+        expect(pause).not.toHaveBeenCalled();
+      }
+    } finally { tui.unmount(); inspect.mockRestore(); }
+  });
+
   it("explains settled additions, active tails, conflicts and review actions", () => {
     const preview: ConversationSyncPreview = {
       sourceId: "fixture", status: "syncable", newTurns: 2, newCompletedTurns: 2,

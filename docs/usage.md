@@ -2,6 +2,9 @@
 
 For installation and the supported release matrix, see the [README](../README.md).
 
+For activity inspection and optional Linux service stop/restart, see
+[runtime maintenance](runtime-maintenance.md).
+
 ## How it works
 
 `t3-import` reads local Codex conversations through `codex app-server` and Codex rollout JSONL files. It reads Claude Code sessions from the JSONL files under `~/.claude/projects/`. OpenCode 2.x sessions are read from a consistent read-only SQLite transaction in `~/.local/share/opencode/opencode.db`, respecting `XDG_DATA_HOME` or an explicit `OPENCODE_DB`. Legacy OpenCode 1.x sessions are unsupported. The source data is normalized into conversations, turns, messages, tool activity, plans, usage, and supported image attachments.

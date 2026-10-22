@@ -31,6 +31,11 @@ without a background watcher or reverse transcript writer. Continuing a bound
 session from T3 uses the provider's native session. Titles remain separate from
 transcript sync. See [compatibility and validation](docs/compatibility.md).
 
+For a Linux T3 Connect server, `t3-import runtime status` reports persisted
+activity and the owning service. The interactive importer offers to pause a
+verified idle systemd service and restore it on exit. Scripts can opt in with
+`--manage-runtime`. See [runtime maintenance](docs/runtime-maintenance.md).
+
 ## Install
 
 The fork package is named `@alsdd/t3-import`; the command remains `t3-import`.

@@ -8,7 +8,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { stdin as input, stdout as output } from "node:process";
 import { z } from "zod";
 import { ImportTui } from "./tui.js";
-import { ImporterError, usageError } from "./core/errors.js";
+import { ImporterError, safetyError, usageError } from "./core/errors.js";
 import { validateDestinationOptions } from "./target/destination.js";
 import type { ImportRunResult, ReplaceRunResult, SourceName, SourceSummary, SyncRunResult } from "./core/types.js";
 import { sourceNames } from "./core/providers.js";
@@ -16,14 +16,55 @@ import { inspectLinkedThreads } from "./target/reconciliation.js";
 import { disposeSourceAdapters, sourceAdapter } from "./sources/index.js";
 import { resolveTargetPaths, type TargetOverrides } from "./target/config.js";
 import { IMPORTER_VERSION, importConversations } from "./target/importer.js";
-import { inspectRuntime, validateTargetDatabase } from "./target/schema.js";
+import { validateTargetDatabase } from "./target/schema.js";
 import { inspectConversationSync, syncConversations } from "./target/sync.js";
 import { syncAllLinkedConversations } from "./target/syncAll.js";
 import { replaceConversations } from "./target/replace.js";
 import { discoverT3CacheProfiles, formatCacheResetResult, resetT3RebuildableCache } from "./target/cache.js";
+import { inspectRuntimeStatus, pauseIdleRuntime, type RuntimeMaintenance } from "./target/runtimeControl.js";
 
 const sourceSchema = z.enum(sourceNames);
 const program = new Command();
+let maintenance: RuntimeMaintenance | undefined;
+let maintenancePromise: Promise<RuntimeMaintenance | undefined> | undefined;
+let activeTui: ReturnType<typeof render> | undefined;
+let activeOperation: Promise<void> | undefined;
+let interrupted: NodeJS.Signals | undefined;
+let pendingJson: unknown;
+let handlingSignals = false;
+function interrupt(signal: NodeJS.Signals): void {
+  interrupted = signal;
+  console.error("Finishing the current operation and restoring the T3 service before exiting…");
+  activeTui?.unmount();
+}
+const onInterrupt = () => interrupt("SIGINT");
+const onTerminate = () => interrupt("SIGTERM");
+async function pauseRuntime(paths: ReturnType<typeof resolveTargetPaths>): Promise<string | undefined> {
+  if (!handlingSignals) {
+    process.on("SIGINT", onInterrupt);
+    process.on("SIGTERM", onTerminate);
+    handlingSignals = true;
+  }
+  maintenancePromise ??= pauseIdleRuntime(paths);
+  try { maintenance = await maintenancePromise; }
+  catch (cause) { maintenancePromise = undefined; throw cause; }
+  if (interrupted) throw safetyError("Maintenance interrupted; restoring the original service.");
+  return maintenance?.service.unit;
+}
+async function prepareRuntime(paths: ReturnType<typeof resolveTargetPaths>, dryRun = false): Promise<void> {
+  if (program.opts<{ manageRuntime?: boolean }>().manageRuntime && !dryRun) await pauseRuntime(paths);
+}
+async function runTui(props: React.ComponentProps<typeof ImportTui>): Promise<void> {
+  await prepareRuntime(props.paths);
+  activeTui = render(React.createElement(ImportTui, {
+    ...props,
+    ...(maintenance ? { initialManagedService: maintenance.service.unit } : {}),
+    onPauseRuntime: () => pauseRuntime(props.paths),
+    onOperation: (operation) => { activeOperation = operation; },
+  }));
+  try { await activeTui.waitUntilExit(); }
+  finally { activeTui = undefined; }
+}
 
 function collect(value: string, previous: string[]): string[] { return [...previous, value]; }
 function globalOverrides(): TargetOverrides {
@@ -32,7 +73,10 @@ function globalOverrides(): TargetOverrides {
 }
 function isJson(): boolean { return Boolean(program.opts<{ json?: boolean }>().json); }
 function shouldResetCache(): boolean { return program.opts<{ cacheReset?: boolean }>().cacheReset !== false; }
-function print(value: unknown): void { console.log(isJson() ? JSON.stringify(value) : typeof value === "string" ? value : JSON.stringify(value, null, 2)); }
+function print(value: unknown): void {
+  if (isJson() && maintenancePromise) { pendingJson = value; return; }
+  console.log(isJson() ? JSON.stringify(value) : typeof value === "string" ? value : JSON.stringify(value, null, 2));
+}
 function printSync(result: SyncRunResult, summary?: boolean): void {
   if (!summary || isJson()) { print(result); return; }
   const updated = result.results.filter((item) => item.status === "synced" || item.status === "dry-run");
@@ -103,12 +147,21 @@ program
   .option("--json", "write machine-readable JSON to stdout")
   .option("--no-color", "disable color output")
   .option("--no-cache-reset", "keep T3's existing IndexedDB cache after writes")
+  .option("--manage-runtime", "pause a verified idle systemd T3 service and restore it on exit")
+  .hook("preAction", (_command, action) => {
+    const supported = action === program || ["import", "sync", "replace"].includes(action.name())
+      || (action.name() === "reset" && action.parent?.name() === "cache");
+    if (program.opts<{ manageRuntime?: boolean }>().manageRuntime && !supported) throw usageError("--manage-runtime is only available for import, sync, replace, and cache reset.");
+  })
   .action(async () => {
     const paths = resolveTargetPaths(globalOverrides());
     const provider = globalOverrides().providerInstance;
-    const instance = render(React.createElement(ImportTui, { paths, resetCache: shouldResetCache(), ...(provider ? { initialProvider: provider } : {}) }));
-    await instance.waitUntilExit();
+    await runTui({ paths, resetCache: shouldResetCache(), ...(provider ? { initialProvider: provider } : {}) });
   });
+
+program.command("runtime").description("Inspect the T3 process, persisted activity and service ownership")
+  .command("status").description("Read runtime activity without stopping T3 or loading provider histories")
+  .action(async () => { print({ schemaVersion: 1, runtime: await inspectRuntimeStatus(resolveTargetPaths(globalOverrides())) }); });
 
 program.command("links")
   .description("Inspect provider bindings, origins and lineage without changing metadata or transcripts")
@@ -154,7 +207,7 @@ program.command("doctor")
   .description("Check source and T3 readiness without changing anything")
   .action(async () => {
     const paths = resolveTargetPaths(globalOverrides());
-    const runtime = await inspectRuntime(paths);
+    const runtime = await inspectRuntimeStatus(paths);
     let database: Record<string, unknown> = { exists: existsSync(paths.dbPath) };
     if (existsSync(paths.dbPath)) {
       const db = new Database(paths.dbPath, { readonly: true, fileMustExist: true });
@@ -180,7 +233,9 @@ cacheCommand.command("reset")
       if (!process.stdout.isTTY || isJson()) throw usageError("Non-interactive cache reset requires --yes.");
       if (!await confirmCacheReset()) return;
     }
-    const result = await resetT3RebuildableCache(resolveTargetPaths(globalOverrides()));
+    const paths = resolveTargetPaths(globalOverrides());
+    await prepareRuntime(paths);
+    const result = await resetT3RebuildableCache(paths);
     print(isJson() ? { schemaVersion: 1, ...result } : formatCacheResetResult(result));
   });
 
@@ -206,14 +261,13 @@ program.command("import")
         const paths = resolveTargetPaths(globalOverrides());
         const source = options.source ? sourceName(options.source) : undefined;
         const provider = globalOverrides().providerInstance;
-        const instance = render(React.createElement(ImportTui, {
+        await runTui({
           paths,
           ...(source ? { initialSource: source } : {}),
           ...(options.workspace ? { initialWorkspace: options.workspace } : {}),
           ...(provider ? { initialProvider: provider } : {}),
           resetCache: shouldResetCache(),
-        }));
-        await instance.waitUntilExit();
+        });
         return;
       }
       throw usageError("Non-interactive import requires --source, --workspace, and either --thread or --all.");
@@ -234,6 +288,7 @@ program.command("import")
     });
     const loaded = await Promise.all(selected.map(async (summary) => ({ conversation: await adapter.load(summary, { workspace: options.workspace!, ...(since ? { since } : {}), ...(options.includeIncomplete !== undefined ? { includeIncomplete: options.includeIncomplete } : {}) }), resume: options.resume })));
     const paths = resolveTargetPaths(globalOverrides());
+    await prepareRuntime(paths, Boolean(options.dryRun));
     const result: ImportRunResult = await importConversations(loaded, paths, { ...globalOverrides(), dryRun: Boolean(options.dryRun), resume: options.resume, ...(options.targetProject ? { targetProject: options.targetProject } : {}), ...(options.noProject ? { noProject: true } : {}) });
     await attachCacheReset(result, paths, result.results.some((item) => item.status === "imported"));
     print(result);
@@ -252,13 +307,12 @@ program.command("replace")
       if (process.stdout.isTTY && !options.nonInteractive && !isJson()) {
         const paths = resolveTargetPaths(globalOverrides());
         const source = options.source ? sourceName(options.source) : undefined;
-        const instance = render(React.createElement(ImportTui, {
+        await runTui({
           paths, mode: "replace",
           ...(source ? { initialSource: source } : {}),
           ...(options.workspace ? { initialWorkspace: options.workspace } : {}),
           resetCache: shouldResetCache(),
-        }));
-        await instance.waitUntilExit();
+        });
         return;
       }
       throw usageError("Non-interactive replacement requires --source, --workspace, and --thread.");
@@ -275,6 +329,7 @@ program.command("replace")
     });
     const loaded = await Promise.all(selected.map(async (summary) => ({ conversation: await adapter.load(summary, { workspace: options.workspace! }) })));
     const paths = resolveTargetPaths(globalOverrides());
+    await prepareRuntime(paths, Boolean(options.dryRun));
     const result = await replaceConversations(loaded, paths, { ...globalOverrides(), dryRun: Boolean(options.dryRun) });
     await attachCacheReset(result, paths, result.results.some((item) => item.status === "replaced"));
     print(result);
@@ -298,14 +353,13 @@ program.command("sync")
         const paths = resolveTargetPaths(globalOverrides());
         const source = options.source ? sourceName(options.source) : undefined;
         const provider = globalOverrides().providerInstance;
-        const instance = render(React.createElement(ImportTui, {
+        await runTui({
           paths, mode: "sync",
           ...(source ? { initialSource: source } : {}),
           ...(options.workspace ? { initialWorkspace: options.workspace } : {}),
           ...(provider ? { initialProvider: provider } : {}),
           resetCache: shouldResetCache(),
-        }));
-        await instance.waitUntilExit();
+        });
         return;
       }
       throw usageError("Non-interactive sync requires --source and either --all or --workspace with --thread.");
@@ -322,6 +376,7 @@ program.command("sync")
     if (options.all && !options.workspace) {
       if (options.since) throw usageError("--since requires --workspace when synchronizing; a global sync checks every linked conversation.");
       const paths = resolveTargetPaths(globalOverrides());
+      await prepareRuntime(paths, Boolean(options.dryRun));
       const result = await syncAllLinkedConversations(adapter, paths, { ...globalOverrides(), dryRun: Boolean(options.dryRun) });
       await attachCacheReset(result, paths, result.results.some((item) => item.status === "synced"));
       printSync(result, options.summary);
@@ -340,6 +395,7 @@ program.command("sync")
     const eligible = options.all
       ? (await Promise.all(loaded.map(async (selection) => ({ selection, preview: await inspectConversationSync(selection.conversation, paths) })))).filter((item) => item.preview.previouslyImported).map((item) => item.selection)
       : loaded;
+    await prepareRuntime(paths, Boolean(options.dryRun));
     const result = await syncConversations(eligible, paths, { ...globalOverrides(), dryRun: Boolean(options.dryRun) });
     await attachCacheReset(result, paths, result.results.some((item) => item.status === "synced"));
     printSync(result, options.summary);
@@ -349,9 +405,40 @@ program.command("sync")
 try {
   await program.parseAsync(process.argv);
 } catch (error) {
-  if (isJson()) console.log(JSON.stringify({ schemaVersion: 1, status: "error", error: error instanceof Error ? error.message : String(error) }));
+  if (isJson()) print({ schemaVersion: 1, status: "error", error: error instanceof Error ? error.message : String(error) });
   else console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = error instanceof ImporterError ? error.exitCode : error instanceof z.ZodError ? 2 : 6;
 } finally {
-  await disposeSourceAdapters();
+  try {
+    // Ink may exit immediately on Ctrl+C while its async database operation is
+    // still running. Wait before disposing adapters or restarting the server.
+    await activeOperation;
+    await disposeSourceAdapters();
+  }
+  finally {
+    try {
+      // A TUI exit or signal may arrive while the asynchronous stop is in flight.
+      maintenance ??= await maintenancePromise;
+      if (maintenance) {
+        console.error(`Restoring T3 service ${maintenance.service.unit}…`);
+        await maintenance.restore();
+        console.error("T3 service is ready.");
+      }
+    } catch (cause) {
+      // A failed pause already attempted restoration and reported its own error.
+      if (maintenance) {
+        const error = cause instanceof Error ? cause.message : String(cause);
+        if (isJson()) pendingJson = { schemaVersion: 1, status: "error", error, operation: pendingJson ?? null };
+        else console.error(error);
+        process.exitCode = 6;
+      }
+    } finally {
+      if (handlingSignals) {
+        process.off("SIGINT", onInterrupt);
+        process.off("SIGTERM", onTerminate);
+      }
+      if (interrupted) process.exitCode = interrupted === "SIGINT" ? 130 : 143;
+      if (pendingJson !== undefined) console.log(JSON.stringify(pendingJson));
+    }
+  }
 }

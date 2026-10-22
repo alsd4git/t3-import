@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Report persisted T3 activity and verified Linux systemd service ownership with
+  `runtime status`, including pending runs, approvals, background work and schedules.
+- Offer explicit idle-service maintenance through the TUI or `--manage-runtime`.
+  Restore the same service after success, cancellation or error; refuse busy,
+  unknown or ambiguously managed instances.
+
 ## 0.1.1-alsd.1
 
 First release from the maintained `alsd4git/t3-import` fork. Package name:
