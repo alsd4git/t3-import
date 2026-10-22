@@ -33,19 +33,19 @@ transcript sync. See [compatibility and validation](docs/compatibility.md).
 
 ## Install
 
-The fork package is named `@alsd4git/t3-import`; the command remains `t3-import`.
+The fork package is named `@alsdd/t3-import`; the command remains `t3-import`.
 Install the scoped npm package, or use the pinned GitHub release tarball below.
 The upstream `@carlosgtrz/t3-import` package does not contain this fork's features.
 
 ```sh
-npm i -g @alsd4git/t3-import --allow-scripts=better-sqlite3
+npm i -g @alsdd/t3-import --allow-scripts=better-sqlite3
 t3-import --version
 ```
 
 For a pinned GitHub release without the npm registry:
 
 ```sh
-npm i -g --allow-scripts=better-sqlite3 https://github.com/alsd4git/t3-import/releases/download/v0.1.1-alsd.1/alsd4git-t3-import-0.1.1-alsd.1.tgz
+npm i -g --allow-scripts=better-sqlite3 https://github.com/alsd4git/t3-import/releases/download/v0.1.1-alsd.1/alsdd-t3-import-0.1.1-alsd.1.tgz
 ```
 
 Versions follow `<T3 version>-alsd.<revision>`. `0.1.1-alsd.1` targets T3 0.1.1

@@ -3,7 +3,7 @@
 ## 0.1.1-alsd.1
 
 First release from the maintained `alsd4git/t3-import` fork. Package name:
-`@alsd4git/t3-import`; executable: `t3-import`. Version numbers follow the latest
+`@alsdd/t3-import`; executable: `t3-import`. Version numbers follow the latest
 supported T3 release plus an independent
 fork revision. GitHub releases provide a tarball; npm publication uses the
 default `latest` channel.
