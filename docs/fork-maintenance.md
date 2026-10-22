@@ -31,24 +31,46 @@ approval is required.
 Keep original authorship and bundled license notices. Update fork repository,
 issue and installation links without rewriting historical validation reports.
 
-## Release checklist
+## Release process
 
-1. Update `package.json`, the root package metadata in `package-lock.json`, the
-   changelog and versioned installation instructions together.
-2. Run `npm ci`, `npm run typecheck`, `npm test`, `npm run build` and
-   `npm run package:check` with Node 24. Check the CI matrix for the exact commit.
-3. Build the artifact from the committed tree with `npm pack` into
-   `artifacts/release-candidate`. Retain the artifact's SHA-256 checksum.
-4. Create an annotated version tag and a GitHub prerelease containing the tarball,
-   checksum and relevant changelog notes. Do not move published tags.
-5. Verify the downloadable artifact matches the local checksum. Keep npm
-   publication an explicitly authorized action; a GitHub release does not publish npm.
-6. When npm publication is authorized, authenticate an account allowed to publish
-   `@alsdd/t3-import`. Publish the verified tarball with
-   `npm publish <tarball> --access public --tag latest`. The explicit `latest`
-   setting makes the T3-aligned prerelease version the default installation,
-   without requiring `@next`. Verify registry metadata and a clean install.
-   A published npm name/version cannot be reused for different contents.
+Update `package.json`, its root entry in `package-lock.json`, the changelog and
+versioned installation instructions together. Push the commit to `main` and
+wait for all six Windows, macOS and Ubuntu Node 22/24 CI jobs to pass. Then push
+an immutable tag exactly matching the package version, such as
+`v0.1.2-alsd.1`. The tag workflow verifies the tag, package name, lockfile and
+that its commit is on `origin/main` before creating a release artifact.
+
+After CI passes, the workflow builds one npm tarball, SHA-256 checksum and
+changelog notes, then uploads those files as the `release-<tag>` workflow
+artifact before publication. It publishes that exact tarball publicly under
+`latest` with npm provenance. On success, it creates a GitHub prerelease with
+the same tarball and checksum. A rerun skips npm only when the already published
+version has identical SHA-512 integrity. Existing GitHub release assets are
+downloaded and byte-compared; mismatches stop the workflow, and missing assets
+are added without replacing existing ones. Do not move or reuse published tags
+or package versions.
+
+### Configure npm trusted publishing once
+
+On the npm package settings for `@alsdd/t3-import`, add a trusted publisher with
+these exact values:
+
+- Provider: GitHub Actions
+- Owner: `alsd4git`
+- Repository: `t3-import`
+- Workflow file: `ci.yml` in `.github/workflows`
+- Environment: leave blank
+
+The workflow uses npm 12.2.0, which supports trusted publishing and provenance.
+Enable direct publishing for the package: npm's current default is staging-only,
+and this workflow runs `npm publish` directly. No npm token or repository npm
+secret is used. The publishing job receives `id-token: write`; only the GitHub
+release step receives `GH_TOKEN` from `github.token`.
+
+The publish job runs only for a `v*` tag push in `alsd4git/t3-import`, after all
+six test jobs pass. npm publication is therefore part of the authorized tag
+release workflow. A published npm name/version cannot be reused for different
+contents.
 
 Versions use `<T3 version>-alsd.<revision>`, starting at `0.1.1-alsd.1`.
 Increment the suffix for importer changes against the same latest validated T3

@@ -46,6 +46,7 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "package:check": "node scripts/package-check.mjs",
+    "release:ci": "node scripts/release.mjs",
     "prepack": "npm run build",
     "prepublishOnly": "npm run typecheck && npm test",
     "release:check": "npm publish --dry-run --access public",
