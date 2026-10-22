@@ -23,13 +23,16 @@ import type {
   ImportSelection,
   TargetPaths,
 } from "../core/types.js";
-import { canonicalPath, deterministicUuid, sha256, truncate } from "../core/util.js";
+import { canonicalPath, deterministicUuid, isObject, sha256, truncate } from "../core/util.js";
 import { checkpointForThread } from "../core/checkpoint.js";
 import { safetyError, writeError } from "../core/errors.js";
 import { resolveProviderSelection, type TargetOverrides } from "./config.js";
 import { assertT3Closed, validateTargetDatabase } from "./schema.js";
 import { recordImports, type LedgerRecord } from "./ledger.js";
 import { importDestination, threadWorkingDirectory, validateDestinationOptions, type DestinationOptions } from "./destination.js";
+import { isV2Database } from "./schema.js";
+import { prepareV2Write, v2ProviderThreads } from "./v2.js";
+import type { ImportCheckpoint } from "../core/checkpoint.js";
 
 const EVENT_TYPES = [
   "project.created",
@@ -77,10 +80,12 @@ export interface PlannedThread {
   alreadyImported: boolean;
   fingerprint: string;
   workingDirectory?: string;
+  checkpoint?: ImportCheckpoint;
+  targetEventCount?: number;
 }
 
 export const MAX_SAFE_IMPORT_EVENTS = 900;
-export const IMPORTER_VERSION = "0.4.1";
+export const IMPORTER_VERSION = (JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { version: string }).version;
 const MAX_LAST_ERROR_LENGTH = 500;
 
 function settledSession(turn: CanonicalThread["turns"][number]): { status: "ready" | "interrupted" | "error"; lastError: string | null } {
@@ -169,6 +174,13 @@ export interface ImportOptions extends TargetOverrides, DestinationOptions {
 }
 
 export function projectionBacklog(db: Database.Database): { latestSequence: number; projectedSequence: number; backlog: number } {
+  if (isV2Database(db)) {
+    // V2's official sink advances this cursor with its thread projections.
+    // Project events share the sequence but do not advance that cursor.
+    const latestSequence = (db.prepare("SELECT COALESCE(MAX(sequence),0) value FROM orchestration_events WHERE application_event_version=2 AND aggregate_kind='thread'").get() as { value: number }).value;
+    const projectedSequence = (db.prepare("SELECT last_sequence value FROM orchestration_v2_projection_metadata WHERE projection_name='thread-projections'").get() as { value: number } | undefined)?.value ?? 0;
+    return { latestSequence, projectedSequence, backlog: Math.max(0, latestSequence - projectedSequence) };
+  }
   const latestSequence = Number((db.prepare("SELECT COALESCE(MAX(sequence), 0) value FROM orchestration_events").get() as { value: number }).value);
   // Newer T3 versions keep a separate attachment-cleanup retry cursor. It only
   // advances at bootstrap, not for live events, and is not a read-model cursor.
@@ -435,6 +447,7 @@ export async function importConversations(
   const releaseLock = options.dryRun ? () => {} : acquireLock(paths);
   const db = new Database(paths.dbPath, { readonly: options.dryRun, fileMustExist: true });
   let backup: string | null = null;
+  let v2Committed = false;
   const runWarnings: string[] = [];
   try {
     const schema = validateTargetDatabase(db);
@@ -449,6 +462,10 @@ export async function importConversations(
           ? thread.sourceSessionId
           : deterministicUuid(`t3-import:thread:${thread.sourceKey}`);
         const imported = isImported(db, thread.sourceKey, thread, threadId);
+        if (isV2Database(db) && !imported) {
+          const linked = v2ProviderThreads(db).filter((row) => isObject(row.nativeThreadRef) && row.nativeThreadRef.driver === (thread.source === "codex" ? "codex" : "claudeAgent") && row.nativeThreadRef.nativeId === thread.sourceSessionId);
+          if (linked.length) throw safetyError("This source session is already linked to a V2 thread. Inspect synchronization instead of creating a duplicate import.");
+        }
         const destination = importDestination(db, paths, thread.workspace, options);
         const workspaceKey = canonicalPath(destination?.projectRoot ?? thread.workspace);
         let projectId = projectIds.get(workspaceKey) ?? existingProjectId(db, thread.workspace);
@@ -504,6 +521,8 @@ export async function importConversations(
       warnings: plan.warnings,
     }));
     const toWrite = planned.filter((plan) => !plan.alreadyImported);
+    const v2Write = isV2Database(db) && toWrite.length ? await prepareV2Write(db, toWrite) : undefined;
+    if (v2Write) for (const plan of toWrite) results.find((result) => result.threadId === plan.threadId)!.events = plan.targetEventCount!;
     if (toWrite.length > 0) {
       const projection = projectionBacklog(db);
       if (projection.backlog > 0) {
@@ -513,7 +532,7 @@ export async function importConversations(
           "Open T3 and let it finish loading before importing more conversations.",
         );
       }
-      const plannedEventCount = toWrite.reduce((sum, plan) => sum + plan.events.length, 0);
+      const plannedEventCount = toWrite.reduce((sum, plan) => sum + (plan.targetEventCount ?? plan.events.length), 0);
       if (plannedEventCount > MAX_SAFE_IMPORT_EVENTS) {
         throw safetyError(
           `The compact import would append ${plannedEventCount} events, exceeding the safe one-launch limit of ${MAX_SAFE_IMPORT_EVENTS}. ` +
@@ -530,6 +549,8 @@ export async function importConversations(
     const assets = materializeAssets(toWrite, paths, randomUUID());
     const ledger: LedgerRecord[] = [];
     try {
+      const v2Written = v2Write ? await v2Write.write() : undefined;
+      v2Committed = Boolean(v2Written);
       const nextVersion = db.prepare("SELECT COALESCE(MAX(stream_version), -1) + 1 nextVersion FROM orchestration_events WHERE aggregate_kind = ? AND stream_id = ?");
       const insert = db.prepare(`
         INSERT INTO orchestration_events (
@@ -554,11 +575,16 @@ export async function importConversations(
           runtime_payload_json=excluded.runtime_payload_json
       `);
       const streamVersions = new Map<string, number>();
-      db.transaction(() => {
+      const collectRecords = () => {
         for (const plan of toWrite) {
           let firstSequence = Number.MAX_SAFE_INTEGER;
           let lastSequence = 0;
-          for (const plannedEvent of plan.events) {
+          if (v2Written) {
+            const sequence = v2Written.get(plan)!;
+            firstSequence = sequence.first;
+            lastSequence = sequence.last;
+          }
+          for (const plannedEvent of v2Written ? [] : plan.events) {
             const streamKey = `${plannedEvent.aggregateKind}:${plannedEvent.streamId}`;
             const version = streamVersions.get(streamKey) ?? (nextVersion.get(plannedEvent.aggregateKind, plannedEvent.streamId) as { nextVersion: number }).nextVersion;
             const result = insert.run(plannedEvent.eventId, plannedEvent.aggregateKind, plannedEvent.streamId, version, plannedEvent.type, plannedEvent.occurredAt, plannedEvent.actorKind, JSON.stringify(plannedEvent.payload), JSON.stringify(plannedEvent.metadata));
@@ -567,7 +593,7 @@ export async function importConversations(
             lastSequence = Math.max(lastSequence, sequence);
             streamVersions.set(streamKey, version + 1);
           }
-          if (plan.resumable && plan.thread.resumeCursor) {
+          if (!v2Written && plan.resumable && plan.thread.resumeCursor) {
             const cursor = plan.thread.source === "claude" ? { threadId: plan.threadId, ...plan.thread.resumeCursor } : plan.thread.resumeCursor;
             upsertRuntime.run(plan.threadId, plan.provider.providerName, plan.provider.instanceId, plan.provider.adapterKey, plan.thread.updatedAt, JSON.stringify(cursor), JSON.stringify({ cwd: plan.thread.workspace, model: plan.provider.model, activeTurnId: null, lastError: null, modelSelection: modelSelection(plan.provider), lastRuntimeEvent: `t3-import.${plan.thread.source}`, lastRuntimeEventAt: plan.thread.updatedAt }));
           }
@@ -586,10 +612,12 @@ export async function importConversations(
             isCanonical: true,
           });
         }
-      })();
+      };
+      if (v2Written) collectRecords();
+      else db.transaction(collectRecords)();
       assets.cleanup();
     } catch (error) {
-      for (const path of assets.created) rmSync(path, { force: true });
+      if (!v2Committed) for (const path of assets.created) rmSync(path, { force: true });
       assets.cleanup();
       throw error;
     }
@@ -598,6 +626,7 @@ export async function importConversations(
     try { recordImports(ledger); } catch (error) { runWarnings.push(`Import succeeded, but the external ledger could not be updated: ${error instanceof Error ? error.message : String(error)}`); }
     return { schemaVersion: 1, status: aggregateStatus(results, false), target: paths.dbPath, migration: schema.migration, backup, results, warnings: runWarnings };
   } catch (error) {
+    if (v2Committed) throw writeError(`V2 import committed, but post-write verification or bookkeeping failed: ${error instanceof Error ? error.message : String(error)}. Attachments were retained. Inspect the target and recover the external ledger before further writes.`, error);
     if (error instanceof Error && error.name === "ImporterError") throw error;
     throw writeError(`Import failed: ${error instanceof Error ? error.message : String(error)}`, error);
   } finally {

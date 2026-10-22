@@ -95,7 +95,7 @@ program
   .description("Import, synchronize, and replace Codex and Claude Code conversations in T3 Code")
   .version(IMPORTER_VERSION)
   .option("--t3-home <path>", "T3 home directory")
-  .option("--db <path>", "T3 state.sqlite path")
+  .option("--db <path>", "T3 database path (state.sqlite or statev2.sqlite)")
   .option("--attachments-dir <path>", "T3 attachments directory")
   .option("--provider-instance <id>", "T3 provider instance")
   .option("--json", "write machine-readable JSON to stdout")

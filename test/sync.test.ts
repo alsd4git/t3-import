@@ -149,7 +149,7 @@ function advancedConversation(workspace: string, sourceThread = canonicalThread(
   return conversation;
 }
 
-describe.each(SUPPORTED_MIGRATIONS)("migration-%i incremental synchronization", (migration) => {
+describe.each(SUPPORTED_MIGRATIONS.filter((migration) => migration < 55))("migration-%i V1 incremental synchronization", (migration) => {
   beforeEach(() => { fixtureMigration = migration; });
   it("appends a Codex suffix and a repeated sync is a no-op", async () => {
     const { workspace, paths } = await importedFixture("t3-sync-codex-");

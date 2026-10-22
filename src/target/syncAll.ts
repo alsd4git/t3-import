@@ -1,10 +1,11 @@
 import Database from "better-sqlite3";
 import type { SourceAdapter, SyncItemResult, SyncRunResult, TargetPaths } from "../core/types.js";
 import { isObject, stringValue } from "../core/util.js";
-import { usageError } from "../core/errors.js";
+import { safetyError, usageError } from "../core/errors.js";
 import { listImports } from "./ledger.js";
 import { createEvent, currentTitle, readEvents, syncConversations, targetId, validRecord, type SyncOptions } from "./sync.js";
-import { validateTargetDatabase } from "./schema.js";
+import { isV2Database, validateTargetDatabase } from "./schema.js";
+import { isV2ProviderSubagent, v2ProviderThreads, v2Thread } from "./v2.js";
 
 interface LinkedThread {
   sourceId: string;
@@ -22,16 +23,25 @@ function linkedCodexThreads(paths: TargetPaths): LinkedThread[] {
       const events = readEvents(db, threadId);
       const created = createEvent(events);
       if (!created || events.some((event) => event.type === "thread.deleted")) return;
+      if (isV2Database(db) && (v2Thread(db, threadId)?.deletedAt || isV2ProviderSubagent(v2Thread(db, threadId)))) return;
+      if (linked.has(sourceId) && linked.get(sourceId)!.threadId !== threadId) throw safetyError(`Multiple T3 threads refer to source session ${sourceId}; resolve the ambiguous binding before sync-all.`);
       linked.set(sourceId, { sourceId, threadId, title: currentTitle(db, threadId, events) });
     };
+    if (isV2Database(db)) for (const row of v2ProviderThreads(db)) {
+      if (row.driver === "codex" && typeof row.appThreadId === "string" && isObject(row.nativeThreadRef) && row.nativeThreadRef.driver === "codex" && row.nativeThreadRef.strength === "strong") {
+        const id = stringValue(row.nativeThreadRef.nativeId);
+        if (id) add(id, row.appThreadId);
+      }
+    }
     const rows = db.prepare(`SELECT thread_id threadId, resume_cursor_json cursor
       FROM provider_session_runtime WHERE provider_name='codex' AND adapter_key='codex'`).all() as Array<{ threadId: string; cursor: string | null }>;
     for (const row of rows) {
+      let sourceId: string | undefined;
       try {
         const cursor: unknown = row.cursor ? JSON.parse(row.cursor) : undefined;
-        const sourceId = isObject(cursor) ? stringValue(cursor.threadId) : undefined;
-        if (sourceId) add(sourceId, row.threadId);
+        sourceId = isObject(cursor) ? stringValue(cursor.threadId) : undefined;
       } catch { /* malformed bindings are not guessed from titles or paths */ }
+      if (sourceId) add(sourceId, row.threadId);
     }
     for (const record of listImports(targetId(paths), "codex")) {
       if (record.isCanonical !== false && validRecord(db, record) && !linked.has(record.sourceSessionId)) {

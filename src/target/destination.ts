@@ -63,7 +63,7 @@ export function importDestination(db: Database.Database, paths: TargetPaths, sou
 
 /** Preserve the effective workspace through sync/replacement, using durable thread events. */
 export function threadWorkingDirectory(db: Database.Database, threadId: string, fallback: string): { cwd: string; worktreePath: string | null } {
-  const rows = db.prepare("SELECT payload_json payload FROM orchestration_events WHERE stream_id=? AND event_type IN ('thread.created', 'thread.meta-updated') ORDER BY sequence").all(threadId) as Array<{ payload: string }>;
+  const rows = db.prepare("SELECT payload_json payload FROM orchestration_events WHERE stream_id=? AND event_type IN ('thread.created', 'thread.meta-updated', 'thread.metadata-updated') ORDER BY sequence").all(threadId) as Array<{ payload: string }>;
   let worktreePath: string | null = null;
   let projectId: string | undefined;
   for (const row of rows) {

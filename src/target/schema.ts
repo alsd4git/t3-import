@@ -1,16 +1,21 @@
 import Database from "better-sqlite3";
 import { existsSync, readFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import type { TargetPaths } from "../core/types.js";
 import { compatibilityError, safetyError } from "../core/errors.js";
 import { isObject, stringValue } from "../core/util.js";
 
-export const SUPPORTED_MIGRATIONS = [40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54] as const;
+export const SUPPORTED_MIGRATIONS = [40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 62] as const;
+
+export function isV2Database(db: Database.Database): boolean {
+  return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='orchestration_v2_projection_threads'").get());
+}
 
 /** Read the current target version, including when recovering an absent ledger. */
 export function targetMigration(db: Database.Database): number {
   const row = db.prepare("SELECT COALESCE(MAX(migration_id), 0) migration FROM effect_sql_migrations").get() as { migration: number };
   if (!SUPPORTED_MIGRATIONS.some((migration) => migration === row.migration)) {
-    throw compatibilityError(`Unsupported T3 schema migration ${row.migration}; supported migrations are 40–54.`);
+    throw compatibilityError(`Unsupported T3 schema migration ${row.migration}; supported migrations are 40–54 (V1) and 62 (T3 0.1.0 V2).`);
   }
   return row.migration;
 }
@@ -59,6 +64,7 @@ export async function inspectRuntime(paths: TargetPaths): Promise<RuntimeState> 
 }
 
 export async function assertT3Closed(paths: TargetPaths): Promise<RuntimeState> {
+  if (basename(paths.dbPath) === "state.sqlite" && existsSync(join(paths.stateDir, "statev2.sqlite"))) throw safetyError("This home has a V2 database. The legacy state.sqlite is a frozen pre-upgrade copy; select statev2.sqlite instead.");
   const runtime = await inspectRuntime(paths);
   if (runtime.live) throw safetyError(`T3 is running${runtime.pid ? ` (PID ${runtime.pid})` : ""}. Close T3 before importing.`);
   return runtime;
@@ -83,6 +89,17 @@ export function validateTargetDatabase(db: Database.Database): SchemaInfo {
   }
   if (!names.has("effect_sql_migrations")) throw compatibilityError("Not a compatible T3 database: missing migrations table.");
   const migration = targetMigration(db);
+  if (isV2Database(db) !== (migration === 62)) throw compatibilityError("T3 database schema and migration disagree about the orchestrator version.");
+  if (migration === 62) {
+    const expected = new Map([[55, "OrchestrationV2"], [56, "RemoveRedundantProjectionIndexes"], [57, "ScheduledTaskWebhooks"], [58, "WebhookRelayDeliveries"], [59, "McpAppModelContext"], [60, "ThreadSnapshotWindowIndexes"], [61, "PullRequestReviewGuides"], [62, "ThreadFailureLookupIndex"]]);
+    const recorded = db.prepare("SELECT migration_id id, name FROM effect_sql_migrations WHERE migration_id >= 55").all() as Array<{ id: number; name: string }>;
+    if (recorded.length !== expected.size || recorded.some((row) => expected.get(row.id) !== row.name)) throw compatibilityError("T3 V2 migration history does not match the pinned 0.1.0 release.");
+    const required = JSON.parse(readFileSync(new URL("../../vendor/t3-v010/schema-columns.json", import.meta.url), "utf8")) as Record<string, string[]>;
+    for (const [table, columns] of Object.entries(required)) {
+      const available = new Set((db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((row) => row.name));
+      for (const column of columns) if (!available.has(column)) throw compatibilityError(`Unsupported T3 V2 schema: ${table}.${column} is missing.`);
+    }
+  }
   const events = db.prepare("SELECT COUNT(*) count, COALESCE(MAX(sequence), 0) maxSequence FROM orchestration_events").get() as { count: number; maxSequence: number };
   return { migration, integrity, eventCount: events.count, maxSequence: events.maxSequence };
 }

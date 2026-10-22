@@ -1,8 +1,76 @@
 # T3 compatibility validation
 
-The importer supports database migrations 40–54 explicitly. A supported number
+The importer supports V1 database migrations 40–54 and T3 0.1.0 V2 migration 62 explicitly. A supported number
 must also pass integrity and required-column checks. This is not a promise that
 every future T3 commit retaining the same migration number will remain compatible.
+
+## T3 0.1.0 / Orchestrator V2
+
+V2 is pinned to `81493efb71e8e8244f95d3e9f71d8369654ab151`, the official
+`v0.1.0` tag. Migration 55 introduces V2 and migration 62 is the release's
+latest migration. Intermediate V2 previews are not supported. Validation checks
+the complete required-column manifest and the names of migrations 55–62,
+not just the highest migration number.
+
+When present, `userdata/statev2.sqlite` is selected ahead of `state.sqlite`.
+An incompatible V2 database is an error, not a reason to modify the retained V1
+copy. An explicit V1 target with a sibling V2 database is also refused for writes.
+`--db` still selects an explicitly supplied database; isolated older homes remain
+supported.
+
+V2 has no V1-style startup replay contract for offline event-only writes. The
+importer therefore ships the official event sink, event store, projection stores,
+and their dependencies as `vendor/t3-v010/runtime.mjs`. Effect is pinned to the
+release's `4.0.4`. Only these persistence components are used; no server, provider
+adapter, reactor, or outbox worker is started. Importer code reserves historical
+turn-item positions before sink normalization, following the upstream legacy
+importer's pattern, so incremental history follows existing native runs.
+
+The shared import plan maps to passive V2 conversation messages and timeline
+items. It creates no queued historical runs or executable outbox work. Tool
+activities without a direct V2 representation retain their payload as a system
+notice. Proposed plans appear as historical timeline items. Native provider
+threads use `not_loaded` references rather than fabricated runtime sessions;
+Claude's `resumeSessionAt` becomes a separate conversation-head reference.
+Completed turns retain their terminal metadata by updating the final timeline
+item unchanged, without adding a visible completion warning. Failed and
+interrupted turns retain a visible notice. Existing imported notices are not
+rewritten by this change.
+
+V1 cutover recovery uses retained canonical importer event IDs and replacement
+metadata. T3's `migration:v1:*` transcript copies are not counted twice. Pending
+legacy hydration, unfinished V2 work, duplicate bindings, provider rebinding,
+and changed execution cwd block reconciliation. Native Codex adoption compares
+provider-turn identity, terminal status, exact visible text, and attachments.
+Unfinished effects/background tasks also block writes, and provider-managed
+native subagents are excluded. Title similarities never establish a source link.
+
+The official sink commits a whole importer batch, its projections, and timeline
+position reservations in one SQLite transaction. External-ledger updates remain
+separate and recoverable from event metadata/checkpoints. An error after a V2
+commit reports that fact and preserves copied attachments. The normal verified
+database backup is created before the transaction.
+
+`test/v2.test.ts` exercises both providers' import/sync/replacement, ledger
+recovery, native Codex prefix adoption, the official V1 cutover, transaction
+rollback, dry-run safety, title preservation, native rebinding, unfinished work,
+and scratch cwd preservation. The V1 cutover test seeds frozen V1 projection
+rows, then runs T3's actual migrations and legacy importer. This does not
+retest V1 projection replay. No test in this suite invokes paid providers or
+establishes that the installed app's UI or provider CLI continuation was tested.
+
+To regenerate the runtime, run `npm run vendor:v2`. The script downloads the
+pinned source archive, verifies its SHA-256, extracts a fresh development copy,
+and installs the separately locked build dependencies with lifecycle scripts
+disabled. It bundles official code and includes its MIT license and third-party
+notices. `T3_V2_SOURCE_ARCHIVE` can select an already-downloaded archive; its
+checksum must still match. `reference.json` records the pin and archive digest.
+Normal builds and package installation use the committed bundle without network
+access. `npm run compat:v2-schema` regenerates only the migration-62 fixture;
+`npm run compat:schemas` regenerates the historical fixtures and V2 together.
+
+See [the V2 validation report](v2-validation.md) for the checks run on this branch
+and the boundaries of the live-provider validation.
 
 ## Pinned references
 

@@ -36,7 +36,7 @@ function catchUp(path: string) {
   finally { db.close(); }
 }
 
-describe.each(SUPPORTED_MIGRATIONS)("migration-%i import destination", (migration) => {
+describe.each(SUPPORTED_MIGRATIONS.filter((migration) => migration < 55))("migration-%i V1 import destination", (migration) => {
   it("reuses an explicitly selected matching project and keeps cwd", async () => {
     const { paths, workspace, conversation } = await fixture(migration);
     const db = new Database(paths.dbPath);

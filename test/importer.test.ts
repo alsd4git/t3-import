@@ -20,7 +20,7 @@ afterEach(() => {
   else process.env.T3_IMPORT_DATA_DIR = originalLedgerDir;
 });
 
-describe.each(SUPPORTED_MIGRATIONS)("migration-%i writer", (migration) => {
+describe.each(SUPPORTED_MIGRATIONS.filter((migration) => migration < 55))("migration-%i V1 writer", (migration) => {
   beforeEach(() => { fixtureMigration = migration; });
   it("writes completed, interrupted, failed, and included active snapshots as settled T3 sessions", async () => {
     const root = await mkdtemp(join(tmpdir(), "t3-import-terminal-"));

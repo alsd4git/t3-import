@@ -80,7 +80,7 @@ it.each([39, 55])("rejects unsupported migration %i without writes", async (migr
     () => importConversations([], paths, { dryRun: false, resume: true }),
     () => syncConversations([], paths, { dryRun: false }),
     () => replaceConversations([], paths, { dryRun: false }),
-  ]) await expect(operation()).rejects.toMatchObject({ exitCode: 3, message: `Unsupported T3 schema migration ${migration}; supported migrations are 40–54.` });
+  ]) await expect(operation()).rejects.toMatchObject({ exitCode: 3, message: `Unsupported T3 schema migration ${migration}; supported migrations are 40–54 (V1) and 62 (T3 0.1.0 V2).` });
   expect(readFileSync(paths.dbPath)).toEqual(before);
   expect(existsSync(join(root, "ledger"))).toBe(false);
   expect(existsSync(paths.attachmentsDir)).toBe(false);

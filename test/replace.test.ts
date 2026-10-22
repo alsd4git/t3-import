@@ -51,7 +51,7 @@ async function fixture(prefix: string) {
   return { root, workspace, paths, conversation };
 }
 
-describe.each(SUPPORTED_MIGRATIONS)("migration-%i canonical task replacement", (migration) => {
+describe.each(SUPPORTED_MIGRATIONS.filter((migration) => migration < 55))("migration-%i V1 canonical task replacement", (migration) => {
   beforeEach(() => { fixtureMigration = migration; });
   it("creates a complete canonical task, deletes the old stream, and transfers resume state", async () => {
     const { root, paths, conversation } = await fixture("t3-replace-");
