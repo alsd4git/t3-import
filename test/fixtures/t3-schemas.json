@@ -4812,7 +4812,7 @@
     ]
   },
   "67": {
-    "commit": "fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92",
+    "commit": "044f07257c9684ae4543bd1e1ebf9c394e9e3830",
     "ddl": [
       "CREATE TABLE auth_pairing_links (\n      id TEXT PRIMARY KEY,\n      credential TEXT NOT NULL UNIQUE,\n      method TEXT NOT NULL,\n      scopes TEXT NOT NULL,\n      subject TEXT NOT NULL,\n      label TEXT,\n      created_at TEXT NOT NULL,\n      expires_at TEXT NOT NULL,\n      consumed_at TEXT,\n      revoked_at TEXT\n    , proof_key_thumbprint TEXT)",
       "CREATE TABLE auth_sessions (\n      session_id TEXT PRIMARY KEY,\n      subject TEXT NOT NULL,\n      scopes TEXT NOT NULL,\n      method TEXT NOT NULL,\n      client_label TEXT,\n      client_ip_address TEXT,\n      client_user_agent TEXT,\n      client_device_type TEXT NOT NULL DEFAULT 'unknown',\n      client_os TEXT,\n      client_browser TEXT,\n      issued_at TEXT NOT NULL,\n      expires_at TEXT NOT NULL,\n      last_connected_at TEXT,\n      revoked_at TEXT\n    , client_surface TEXT, client_app_version TEXT)",

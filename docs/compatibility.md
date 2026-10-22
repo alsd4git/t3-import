@@ -4,14 +4,23 @@ The importer supports V1 database migrations 40–54 and T3 V2 migrations 62 and
 must also pass integrity and required-column checks. This is not a promise that
 every future T3 commit retaining the same migration number will remain compatible.
 
-## T3 0.1.1 / migration 67
+## T3 0.1.1–0.1.2 / migration 67
 
-The separate profile pins `v0.1.1` to
-`fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92`. Its runtime lives in
-`vendor/t3-v011`, with Effect 4.0.5 installed under the `effect-v011` package
-alias. The 0.1.0 runtime retains Effect 4.0.4; both profiles run in the same
-integration suite. Selection uses the validated database migration, never the
-installed app's display version alone.
+The migration 67 writer pins `v0.1.2` to
+`044f07257c9684ae4543bd1e1ebf9c394e9e3830` in `vendor/t3-v012`. The earlier
+`v0.1.1` reference (`fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92`) remains in
+`vendor/t3-v011` for compatibility tests. Both use Effect 4.0.5, installed under
+the existing `effect-v011` alias. The 0.1.0 runtime retains Effect 4.0.4.
+Selection uses the validated database migration, never the installed app's
+display version alone.
+
+T3 0.1.2 adds no migrations. Every executable migration file is unchanged from
+0.1.1, and schema generation verifies identical DDL and normalized migration
+history before sharing profile 67. The generator refuses releases that claim
+the same migration but produce different schemas. The new runtime includes the
+0.1.2 EventSink outcome metrics and optional approval/shell fields; import and
+sync are tested against all three pinned official runtimes. See the
+[0.1.2 validation record](v012-validation.md).
 
 Migration 63 drops unused V1 projections including `projection_state`. V2
 validation uses its own full column manifest and migration names through 67;
@@ -20,6 +29,7 @@ unsupported. New schema generation and vendoring are explicit development steps:
 
 ```text
 node scripts/v2/build-runtime.mjs 0.1.1
+node scripts/v2/build-runtime.mjs 0.1.2
 npm run compat:v2-schema
 ```
 

@@ -75,7 +75,7 @@ node scripts/runtime-service-check.mjs .
 ```
 
 This creates a uniquely named temporary user service, a synthetic HTTP runtime,
-isolated T3 and Codex homes, and a T3 0.1.1 fixture database. It tests real systemd
+isolated T3 and Codex homes, and a T3 0.1.2 fixture database. It tests real systemd
 ownership, import and restore, error restoration, TUI cancellation, SIGTERM and
 busy refusal. It cleans up its own service and fixtures, without stopping
 `t3code.service` or modifying real conversations.

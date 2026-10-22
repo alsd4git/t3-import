@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { zstdCompressSync } from "node:zlib";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const metadata = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
@@ -82,7 +83,7 @@ try {
   const ledger = join(temporaryRoot, "ledger");
   await Promise.all([mkdir(stateDirectory, { recursive: true }), mkdir(join(codexHome, "sessions", "2026", "10"), { recursive: true }), mkdir(workspace)]);
 
-  const runtime = await import(pathToFileURL(join(installedPackage, "vendor", "t3-v011", "runtime.mjs")).href);
+  const runtime = await import(pathToFileURL(join(installedPackage, "vendor", "t3-v012", "runtime.mjs")).href);
   const loggerMethods = ["debug", "info", "log", "warn", "error"].map((method) => [method, console[method].bind(console)]);
   for (const [method] of loggerMethods) console[method] = () => {};
   try {
@@ -94,7 +95,7 @@ try {
   const sessionId = "11111111-1111-4111-8111-111111111111";
   const sessionMeta = codexEvent("session_meta", { id: sessionId, cwd: workspace, timestamp: "2026-10-01T00:00:00.000Z", git_branch: "package-check" }, "2026-10-01T00:00:00.000Z");
   const context = codexEvent("turn_context", { model: "synthetic-model", effort: "medium", cwd: workspace }, "2026-10-01T00:00:00.000Z");
-  await writeFile(fixturePath, [sessionMeta, context, ...codexTurn(1, "2026-10-01T00:00:00.000Z")].join("\n") + "\n");
+  await writeFile(fixturePath + ".zst", zstdCompressSync(Buffer.from([sessionMeta, context, ...codexTurn(1, "2026-10-01T00:00:00.000Z")].join("\n") + "\n")));
 
   const commonEnv = {
     T3CODE_HOME: isolatedHome,
@@ -110,6 +111,8 @@ try {
   const importResult = JSON.parse(importOutput);
   if (importResult.status !== "imported") throw new Error(`Packed CLI synthetic import returned ${importResult.status}:\n${importOutput}`);
 
+  // Simulate Codex resuming a compressed rollout. Both files coexist; prefer
+  // the current plain transcript and append only the newly settled turn.
   await writeFile(fixturePath, [sessionMeta, context, ...codexTurn(1, "2026-10-01T00:00:00.000Z"), ...codexTurn(2, "2026-10-01T00:02:00.000Z")].join("\n") + "\n");
   const syncOutput = run(process.execPath, [cli, ...cliArgs, "sync", "--source", "codex", "--workspace", workspace, "--thread", sessionId, "--yes", "--non-interactive", "--summary", "--json"], { env: commonEnv });
   const syncResult = JSON.parse(syncOutput);
@@ -121,7 +124,7 @@ try {
   // Let the verification process exit and unload the DLL before removing install/.
   run(process.execPath, [fileURLToPath(new URL("./package-database-check.mjs", import.meta.url)), join(installedPackage, "package.json"), stateDatabase]);
 
-  console.log(`Packed artifact ${metadata.name}@${metadata.version}: install, CLI help/version, and T3 0.1.1 import/sync passed.`);
+  console.log(`Packed artifact ${metadata.name}@${metadata.version}: install, CLI help/version, and T3 0.1.2 import/sync passed.`);
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
 }

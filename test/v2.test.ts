@@ -11,7 +11,11 @@ import { replaceConversations } from "../src/target/replace.js";
 import { syncAllLinkedConversations } from "../src/target/syncAll.js";
 import type { CanonicalConversation, SourceName } from "../src/core/types.js";
 
-describe.each([62, 67])("V2 migration %i", (migration) => {
+describe.each([
+  { migration: 62, release: "0.1.0", directory: "t3-v010" },
+  { migration: 67, release: "0.1.1", directory: "t3-v011" },
+  { migration: 67, release: "0.1.2", directory: "t3-v012" },
+])("T3 $release / V2 migration $migration", ({ migration, directory }) => {
 let root: string;
 let ledger: string | undefined;
 beforeEach(() => {
@@ -171,7 +175,7 @@ it("refuses an unprojected V2 event backlog without creating a backup or ledger"
 });
 
 async function officialRuntime(): Promise<any> {
-  return import(new URL(`../vendor/${migration === 62 ? "t3-v010" : "t3-v011"}/runtime.mjs`, import.meta.url).href);
+  return import(new URL(`../vendor/${directory}/runtime.mjs`, import.meta.url).href);
 }
 
 it.each(["codex", "opencode"] as const)("adopts exact native V2 %s turns and rejects a changed transcript", async (source) => {

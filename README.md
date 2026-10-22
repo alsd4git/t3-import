@@ -20,11 +20,14 @@ T3 Code or its providers.
 | --- | --- | --- |
 | V1 | 40–54 | Codex, Claude Code |
 | T3 0.1.0 / Orchestrator V2 | 62 | Codex, Claude Code, OpenCode |
-| T3 0.1.1 / Orchestrator V2 | 67 | Codex, Claude Code, OpenCode |
+| T3 0.1.1–0.1.2 / Orchestrator V2 | 67 | Codex, Claude Code, OpenCode |
 
 Use **Node.js 22.21.1+ or 24+**. Unknown schemas, including intermediate V2
 migrations, are refused. T3 owns database upgrades; the importer never migrates
 your installation. OpenCode requires its 2.x SQLite session format.
+
+Codex discovery and import read both `.jsonl` and Zstandard `.jsonl.zst`
+rollouts directly. If both forms coexist, the plain rollout takes precedence.
 
 History sync goes **from the provider into T3**. It is an explicit operation,
 without a background watcher or reverse transcript writer. Continuing a bound

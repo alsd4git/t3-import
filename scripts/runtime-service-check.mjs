@@ -72,7 +72,7 @@ async function cancelTui(signal) {
 }
 try {
   await Promise.all([mkdir(state, { recursive: true }), mkdir(codex), mkdir(workspace), mkdir(unitDirectory, { recursive: true })]);
-  const runtime = await import(pathToFileURL(join(root, "vendor/t3-v011/runtime.mjs")).href);
+  const runtime = await import(pathToFileURL(join(root, "vendor/t3-v012/runtime.mjs")).href);
   await runtime.createSchema(database);
   const serverPath = join(temporary, "server.mjs");
   await writeFile(serverPath, `
