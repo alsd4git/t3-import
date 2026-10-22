@@ -1,0 +1,13 @@
+ t3-import
+ Target: /demo/T3/userdata/statev2.sqlite
+
+ Select conversations — /demo/OpenCode/project
+ › ◉ Synthetic new conversation  new
+   ○ Synthetic syncable conversation  2 new turns
+   ⊘ Synthetic current conversation  up to date
+   ⊘ Synthetic conflict conversation  history changed · replace available
+ New: 1 · To sync: 1 · Current: 1 · Active only: 0 · Conflicts: 1 · Unavailable: 0
+
+ Select to import a new conversation. No eligible existing target was found.
+
+ ↑/↓ or j/k move  Space select  a all  / search  Enter continue  Esc back/quit  q quit

@@ -1,0 +1,22 @@
+ t3-import
+ Target: /demo/T3/userdata/statev2.sqlite
+
+ Review changes
+ Source: opencode · Workspace: /demo/OpenCode/project
+ Source working directory: /demo/OpenCode/project
+ Effective T3 working directory: /demo/OpenCode/project
+ Destination: Create or use the workspace project (default)
+ New tasks: 1 · synchronized tasks: 0
+ Imported turns: 1 · added turns: 0 · adopted turns: 0
+ Messages: 2 · activities: 1 · attachments: 0
+ Title updates: 0
+
+ Synthetic new conversation
+
+ Will import a new conversation after confirmation.
+ Provider for new tasks: opencode
+ T3 IndexedDB cache: keep existing cache
+ T3 must remain closed. A verified backup will be created before database changes.
+ Press Enter to continue, Escape to go back.
+
+ Enter confirm  Esc back  q quit

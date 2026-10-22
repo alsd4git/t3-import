@@ -1,7 +1,7 @@
 {
-  "name": "@carlosgtrz/t3-import",
-  "version": "0.5.0-v2.1",
-  "description": "Import, synchronize, and safely replace Codex and Claude Code conversations in T3 Code",
+  "name": "@alsd4git/t3-import",
+  "version": "0.5.0-fork.1",
+  "description": "Import and sync Codex, Claude Code, and OpenCode conversations into T3 Code",
   "keywords": [
     "t3code",
     "codex",
@@ -9,7 +9,9 @@
     "conversation",
     "importer",
     "cli",
-    "tui"
+    "tui",
+    "opencode",
+    "sync"
   ],
   "author": {
     "name": "CarlosGtrz",
@@ -17,12 +19,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/CarlosGtrz/t3-import.git"
+    "url": "git+https://github.com/alsd4git/t3-import.git"
   },
   "bugs": {
-    "url": "https://github.com/CarlosGtrz/t3-import/issues"
+    "url": "https://github.com/alsd4git/t3-import/issues"
   },
-  "homepage": "https://github.com/CarlosGtrz/t3-import#readme",
+  "homepage": "https://github.com/alsd4git/t3-import#readme",
   "type": "module",
   "bin": {
     "t3-import": "dist/cli.js"
@@ -32,6 +34,9 @@
     "vendor/t3-v010",
     "vendor/t3-v011",
     "README.md",
+    "CHANGELOG.md",
+    "assets/fork-demo.png",
+    "assets/fork-demo.gif",
     "LICENSE"
   ],
   "scripts": {
@@ -75,5 +80,15 @@
     "tsx": "^4.20.4",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"
+  },
+  "contributors": [
+    {
+      "name": "Alessandro Digilio",
+      "url": "https://github.com/alsd4git"
+    }
+  ],
+  "allowScripts": {
+    "better-sqlite3@12.11.1": true,
+    "esbuild@0.28.2": true
   }
 }

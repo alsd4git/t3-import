@@ -1,0 +1,9 @@
+ t3-import
+ Target: /demo/T3/userdata/statev2.sqlite
+
+ Choose a source
+    Codex
+    Claude Code
+ ›  OpenCode
+
+ ↑/↓ or j/k move  Enter choose  Esc back/quit  q quit
