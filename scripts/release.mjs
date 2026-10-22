@@ -70,8 +70,10 @@ async function prepare() {
   const changelog = await readFile(join(root, 'CHANGELOG.md'), 'utf8');
   const tag = process.env.GITHUB_REF_NAME;
   validateRelease({ tag, packageJson, lockJson, repository: process.env.GITHUB_REPOSITORY });
-  run('git', ['fetch', 'origin', 'main:refs/remotes/origin/main', '--no-tags']);
-  run('git', ['merge-base', '--is-ancestor', 'HEAD', 'origin/main']);
+  run('git', ['fetch', '--no-prune', '--no-prune-tags', '--no-tags', 'origin', 'refs/heads/main:refs/remotes/origin/main']);
+  const main = run('git', ['rev-parse', 'FETCH_HEAD']);
+  run('git', ['merge-base', '--is-ancestor', 'HEAD', main]);
+  if (run('git', ['status', '--porcelain', '--untracked-files=normal'])) throw new Error('Release artifacts must be built from a clean committed tree');
 
   const out = join(root, 'artifacts', 'release');
   await rm(out, { recursive: true, force: true });
