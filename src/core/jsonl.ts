@@ -1,5 +1,6 @@
 import { createReadStream, statSync } from "node:fs";
 import { StringDecoder } from "node:string_decoder";
+import { pipeline } from "node:stream/promises";
 import { createZstdDecompress } from "node:zlib";
 import { sha256 } from "./util.js";
 
@@ -13,7 +14,11 @@ export interface JsonlSnapshot {
 /** Stream decoded lines without extracting or modifying provider files. */
 export async function* readJsonlLines(path: string): AsyncGenerator<string> {
   const file = createReadStream(path);
-  const stream = path.endsWith(".jsonl.zst") ? file.compose(createZstdDecompress()) : file;
+  const decompressor = path.endsWith(".jsonl.zst") ? createZstdDecompress() : undefined;
+  const stream = decompressor ?? file;
+  // Attach the rejection handler before consuming output. Both input failures
+  // and decoder finalization errors must reject reads, including truncated frames.
+  const completion = decompressor ? pipeline(file, decompressor).then(() => undefined, (error: unknown) => error) : Promise.resolve(undefined);
   const decoder = new StringDecoder("utf8");
   let pending = "";
   try {
@@ -27,11 +32,14 @@ export async function* readJsonlLines(path: string): AsyncGenerator<string> {
       }
       pending = pending.slice(start);
     }
+    const failure = await completion;
+    if (failure) throw failure;
     pending += decoder.end();
     if (pending) yield pending.replace(/\r$/u, "");
   } finally {
     stream.destroy();
     file.destroy();
+    await completion;
   }
 }
 

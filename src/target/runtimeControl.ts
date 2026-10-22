@@ -58,7 +58,7 @@ export async function discoverRuntimeService(
   if (!unit) return undefined;
   for (const scope of ["user", "system"] as const) {
     try {
-      if (scope === "user" && statSync(join(procRoot, String(pid))).uid !== process.getuid?.()) continue;
+      if (scope === "user" && process.getuid && statSync(join(procRoot, String(pid))).uid !== process.getuid()) continue;
       const data = await properties({ scope, unit }, run);
       const mainPid = Number(data.MainPID);
       if (data.Id !== unit || data.ActiveState !== "active" || !mainPid || !data.ControlGroup || data.TriggeredBy) continue;
