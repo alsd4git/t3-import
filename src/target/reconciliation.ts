@@ -6,7 +6,7 @@ import { sourceDriver, sourceFromDriver, sourceNames } from "../core/providers.j
 import { compatibilityError, safetyError } from "../core/errors.js";
 import { inspectRuntime, isV2Database, validateTargetDatabase } from "./schema.js";
 
-type MappingStatus = "strong" | "weak" | "ambiguous" | "unlinked";
+type MappingStatus = "strong" | "weak" | "historical" | "ambiguous" | "unlinked";
 type ThreadOrigin = "imported" | "native" | "unknown";
 
 export interface LinkedProviderBinding {
@@ -16,6 +16,7 @@ export interface LinkedProviderBinding {
   strength: "strong" | "weak" | "none";
   providerInstanceId: string | null;
   status: string | null;
+  providerThreadId?: string;
 }
 
 export interface LinkedThreadEvidence {
@@ -31,6 +32,8 @@ export interface LinkedThreadEvidence {
   lineage: { parentThreadId: string | null; relationshipToParent: string | null; rootThreadId: string | null };
   origin: ThreadOrigin;
   bindings: LinkedProviderBinding[];
+  historicalBindings: LinkedProviderBinding[];
+  migration: { status: "legacy-only" | "continued" | "unverified"; handoffIds: string[] } | null;
   mapping: MappingStatus;
   ambiguity: string[];
   evidence: string[];
@@ -149,7 +152,25 @@ function v2Bindings(db: Database.Database, threadId: string, thread: Record<stri
   });
   const activeId = stringValue(thread.activeProviderThreadId);
   const selected = activeId ? candidates.filter((item) => item.providerThreadId === activeId) : candidates;
-  return selected.map(({ providerThreadId: _providerThreadId, ...binding }) => binding);
+  return selected;
+}
+
+function migrationEvidence(db: Database.Database, threadId: string, thread: Record<string, unknown> | undefined,
+  bindings: LinkedProviderBinding[], historical: LinkedProviderBinding[]): LinkedThreadEvidence["migration"] {
+  if (!historical.length || thread?.historyOrigin !== "v1_import") return null;
+  const current = bindings.filter((binding) => binding.nativeId);
+  if (!current.length) return { status: "legacy-only", handoffIds: [] };
+  const rows = db.prepare("SELECT payload_json payload FROM orchestration_v2_projection_context_handoffs WHERE thread_id=?").all(threadId) as Array<{ payload: string }>;
+  const handoffIds = rows.flatMap((row) => {
+    const handoff = parseObject(row.payload);
+    if (!handoff || handoff.threadId !== threadId || handoff.strategy !== "manual_context" || handoff.status !== "ready") return [];
+    const target = current.find((binding) => binding.providerThreadId === handoff.toProviderThreadId);
+    const covered = isObject(handoff.coveredRunOrdinals) ? handoff.coveredRunOrdinals : undefined;
+    // The cutover's first-run handoff establishes continuity, not equal transcripts.
+    if (!target || covered?.from !== 1 || covered?.to !== 1) return [];
+    return stringValue(handoff.id) ? [String(handoff.id)] : [];
+  });
+  return { status: handoffIds.length ? "continued" : "unverified", handoffIds };
 }
 
 function v1Binding(db: Database.Database, threadId: string): { binding?: LinkedProviderBinding; imported: boolean; evidence: string[] } {
@@ -202,23 +223,25 @@ function buildRows(db: Database.Database, v2: boolean, options: InspectLinkedThr
     const lineage = isObject(projected?.lineage) ? projected.lineage : {};
     const subagent = lineage.relationshipToParent === "subagent";
     const bindings = v2 ? v2Bindings(db, row.threadId, projected ?? {}) : [];
-    const legacy = v2 ? undefined : v1Binding(db, row.threadId);
-    if (legacy?.binding) bindings.push(legacy.binding);
-    const includeInReport = (!archived || Boolean(options.includeArchived))
-      && (!subagent || Boolean(options.includeSubagents))
-      && (!options.source || bindings.some((binding) => binding.source === options.source));
-    const strong = bindings.filter((binding) => binding.strength === "strong" && binding.nativeId);
-    const localAmbiguity = new Set(strong.map((binding) => `${binding.source}\u0000${binding.nativeId}`)).size > 1;
-    const mapping: MappingStatus = localAmbiguity ? "ambiguous" : strong.length ? "strong" : bindings.some((binding) => binding.strength === "weak") ? "weak" : "unlinked";
-    const provider = strong[0] ?? bindings[0];
-    const effectiveCwd = row.worktreePath ?? row.projectRoot;
+    const legacy = v1Binding(db, row.threadId);
+    const historicalBindings = v2 && legacy.binding?.nativeId ? [legacy.binding] : [];
+    if (!v2 && legacy.binding) bindings.push(legacy.binding);
     const importMetadata = v2 ? readV2ImportMetadata(db, row.threadId) : undefined;
     if (importMetadata && !bindings.some((binding) => binding.source === importMetadata.source && binding.nativeId === importMetadata.sourceSessionId)) {
       bindings.push({ source: importMetadata.source, driver: sourceDriver(importMetadata.source), nativeId: importMetadata.sourceSessionId, strength: "strong", providerInstanceId: stringValue(projected?.providerInstanceId) ?? null, status: "imported" });
     }
+    const includeInReport = (!archived || Boolean(options.includeArchived))
+      && (!subagent || Boolean(options.includeSubagents))
+      && (!options.source || [...bindings, ...historicalBindings].some((binding) => binding.source === options.source));
+    const strong = bindings.filter((binding) => binding.strength === "strong" && binding.nativeId);
+    const localAmbiguity = new Set(strong.map((binding) => `${binding.source}\u0000${binding.nativeId}`)).size > 1;
+    const mapping: MappingStatus = localAmbiguity ? "ambiguous" : strong.length ? "strong" : bindings.some((binding) => binding.strength === "weak") ? "weak" : historicalBindings.length ? "historical" : "unlinked";
+    const provider = strong[0] ?? bindings[0];
+    const effectiveCwd = row.worktreePath ?? row.projectRoot;
+    const migration = v2 ? migrationEvidence(db, row.threadId, projected, bindings, historicalBindings) : null;
     const importMismatch = Boolean(importMetadata && bindings.some((binding) => binding.strength === "strong" && binding.nativeId && (binding.source !== importMetadata.source || binding.nativeId !== importMetadata.sourceSessionId)));
     const evidence = v2
-      ? [projected?.historyOrigin === "v1_import" ? "V2 app-thread historyOrigin is v1_import" : "V2 app-thread projection inspected", ...(provider?.nativeId ? ["Provider-thread nativeThreadRef inspected"] : ["No native provider-thread reference found"]), ...(importMetadata ? ["Canonical thread.created metadata carries the t3Import source identity"] : [])]
+      ? [projected?.historyOrigin === "v1_import" ? "V2 app-thread historyOrigin is v1_import" : "V2 app-thread projection inspected", ...(provider?.providerThreadId ? ["Provider-thread nativeThreadRef inspected"] : ["No native provider-thread reference found"]), ...(historicalBindings.length ? ["Retained V1 resume cursor proves historical provider identity, not the current V2 session"] : []), ...(migration?.status === "continued" ? ["First-run manual_context handoff links legacy app history to the current V2 provider thread"] : []), ...(importMetadata ? ["Canonical thread.created metadata carries the t3Import source identity"] : [])]
       : legacy?.evidence ?? ["V1 projected thread inspected"];
     const ambiguity = [
       ...(localAmbiguity ? ["This T3 thread has multiple distinct strong native-provider bindings."] : []),
@@ -228,13 +251,13 @@ function buildRows(db: Database.Database, v2: boolean, options: InspectLinkedThr
       threadId: row.threadId, title: row.title, projectId: row.projectId, projectTitle: row.projectTitle, projectRoot: row.projectRoot,
       worktreePath: row.worktreePath, effectiveCwd, archived, subagent,
       lineage: { parentThreadId: stringValue(lineage.parentThreadId) ?? null, relationshipToParent: stringValue(lineage.relationshipToParent) ?? null, rootThreadId: stringValue(lineage.rootThreadId) ?? null },
-      origin: originOf(projected, importMetadata, legacy?.imported), bindings,
+      origin: originOf(projected, importMetadata, legacy.imported), bindings, historicalBindings, migration,
       mapping: localAmbiguity || importMismatch ? "ambiguous" : mapping,
       ambiguity, evidence, includeInReport,
     }];
   });
   const byNative = new Map<string, LinkedThreadEvidence[]>();
-  for (const thread of out) for (const binding of thread.bindings) {
+  for (const thread of out) for (const binding of [...thread.bindings, ...thread.historicalBindings]) {
     if (binding.strength !== "strong" || !binding.nativeId) continue;
     const key = `${binding.source}\u0000${binding.nativeId}`;
     byNative.set(key, [...(byNative.get(key) ?? []), thread]);
@@ -245,7 +268,7 @@ function buildRows(db: Database.Database, v2: boolean, options: InspectLinkedThr
     if (threadIds.length > 1) ambiguous.set(key, threadIds);
   }
   return out.map((thread) => {
-    const keys = thread.bindings.filter((binding) => binding.strength === "strong" && binding.nativeId)
+    const keys = [...thread.bindings, ...thread.historicalBindings].filter((binding) => binding.strength === "strong" && binding.nativeId)
       .map((binding) => `${binding.source}\u0000${binding.nativeId}`);
     const duplicateTargets = keys.flatMap((key) => ambiguous.get(key) ?? []);
     if (!duplicateTargets.length) return thread;

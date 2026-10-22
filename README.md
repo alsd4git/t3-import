@@ -99,6 +99,22 @@ Reopen T3 after the command finishes to see the changes. Writes retain the norma
 
 See the [validation report](docs/codex-sync-validation.md) for automated tests, database copy checks, live application confirmation, and remaining reconciliation limits.
 
+### Inspect current and historical links
+
+`t3-import links --json` is read-only and does not require closing T3. In a V2
+database, `bindings` describes current native or canonical import identities;
+`historicalBindings` retains exact V1 resume IDs separately. `mapping: historical`
+means a known historical identity exists but no current eligible binding was
+found. It does not mean the conversations have equal transcripts or can be synced.
+The `--source` filter considers both current and historical identities.
+
+For migrated app threads, `migration.status` distinguishes `legacy-only`,
+`continued` with a matching first-run context handoff, and `unverified` when a
+current identity exists without that evidence. Historical/current IDs remain
+separate even when the report verifies an app-history handoff. Deleted threads
+are excluded; archived and child threads remain opt-in. Reports from a running
+T3 installation are provisional. This report never changes names or spawn edges.
+
 Global target options can be placed before or after a subcommand:
 
 ```text
@@ -148,9 +164,25 @@ Replace options:
 
 The normal TUI labels conversations as new, syncable, up to date, active-only, or conflicted. Interrupted and failed additions are called out in the status text, and ignored active turns are shown without enabling them for synchronization. A history conflict is labeled `history changed · replace available` when it can be replaced. Replacement choices cannot be mixed with imports or ordinary syncs. The dedicated `sync` and `replace` commands open focused TUI flows when required arguments are omitted on a terminal.
 
+The conversation chooser includes counts for new imports, pending syncs, current
+history, active-only sessions, conflicts and unavailable sources. Focus a row to
+see its next action and the specific reconciliation warning or loading error.
+The confirmation screen repeats each selected operation before writing anything.
+
 When `--json` is active, stdout contains one versioned JSON value and diagnostics use stderr. Exit codes are `2` usage, `3` T3 compatibility, `4` safety refusal including live T3 or a corrupt import ledger, `5` source parsing, `6` write failure, and `7` reconciliation conflict.
 
 ## Safety and storage
+
+OpenCode continuation through T3 uses the linked native session. T3 0.1.1 also
+copies its local title into OpenCode when resuming, so a provider-only `[T3]`
+prefix may be overwritten. Provider title normalization is a separate explicit
+operation; transcript sync preserves local T3 titles. See the
+[live continuation check](docs/continuation-validation-2026-10-22.md).
+
+Before distributing this fork, run `npm run package:check`. It installs the packed
+tarball with independent dependencies and checks synthetic import, incremental
+sync and idempotency. The same check runs in CI on Node 22/24 and Windows, macOS,
+and Ubuntu. See [package validation](docs/package-validation.md).
 
 - Close T3 before every real import. There is deliberately no force bypass.
 - Every write creates and verifies a timestamped SQLite backup under `<state-dir>/t3-import-backups/`.

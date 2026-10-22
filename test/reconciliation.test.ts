@@ -30,6 +30,68 @@ async function fixture(migration: number) {
 }
 
 describe("linked thread evidence report", () => {
+  it.each([62, 67])("keeps V1 identity historical until a verified V2 handoff exists, migration %i", async (migration) => {
+    const { paths, workspace } = await fixture(migration);
+    const conversation = canonicalConversation(workspace);
+    const imported = await importConversations([{ conversation, resume: true }], paths, { dryRun: false, resume: true });
+    const threadId = imported.results[0]!.threadId;
+    const db = new Database(paths.dbPath);
+    try {
+      db.prepare(`INSERT INTO provider_session_runtime
+        (thread_id,provider_name,adapter_key,runtime_mode,status,last_seen_at,resume_cursor_json,runtime_payload_json,provider_instance_id)
+        VALUES (?,'codex','codex','full-access','stopped',?,?,'{}','codex')`)
+        .run(threadId, "2026-01-01T00:00:00.000Z", JSON.stringify({ threadId: "legacy-session" }));
+      db.prepare(`UPDATE orchestration_v2_projection_threads SET active_provider_thread_id=NULL,
+        payload_json=json_set(payload_json,'$.historyOrigin','v1_import','$.activeProviderThreadId',NULL) WHERE thread_id=?`).run(threadId);
+      const provider = db.prepare("SELECT provider_thread_id id,payload_json payload FROM orchestration_v2_projection_provider_threads WHERE thread_id=?").get(threadId) as { id: string; payload: string };
+      db.prepare("DELETE FROM orchestration_v2_projection_provider_threads WHERE thread_id=?").run(threadId);
+      // Remove the synthetic import identity: this fixture now represents native V1 cutover.
+      db.prepare("UPDATE orchestration_events SET metadata_json='{}' WHERE stream_id=?").run(threadId);
+      const historical = await inspectLinkedThreads(paths, { source: "codex" });
+      expect(historical.threads).toMatchObject([{
+        threadId, mapping: "historical", bindings: [],
+        historicalBindings: [{ nativeId: "legacy-session", strength: "strong" }],
+        migration: { status: "legacy-only", handoffIds: [] },
+      }]);
+      expect((await inspectLinkedThreads(paths, { source: "opencode" })).threads).toHaveLength(0);
+
+      const payload = JSON.parse(provider.payload);
+      payload.nativeThreadRef.nativeId = "new-session";
+      db.prepare(`INSERT INTO orchestration_v2_projection_provider_threads
+        (provider_thread_id,thread_id,provider,status,updated_at,payload_json,driver,provider_instance_id)
+        VALUES (?,?,'codex','idle',?,?, 'codex','codex')`).run(provider.id, threadId, "2026-01-02T00:00:00.000Z", JSON.stringify(payload));
+      db.prepare(`UPDATE orchestration_v2_projection_threads SET active_provider_thread_id=?,
+        payload_json=json_set(payload_json,'$.activeProviderThreadId',?) WHERE thread_id=?`).run(provider.id, provider.id, threadId);
+      expect((await inspectLinkedThreads(paths)).threads[0]).toMatchObject({
+        mapping: "strong", bindings: [{ nativeId: "new-session" }],
+        historicalBindings: [{ nativeId: "legacy-session" }], migration: { status: "unverified" },
+      });
+      const handoff = { id: "cutover-handoff", threadId, toProviderThreadId: provider.id,
+        strategy: "manual_context", status: "ready", coveredRunOrdinals: { from: 1, to: 1 } };
+      db.prepare(`INSERT INTO orchestration_v2_projection_context_handoffs
+        (context_handoff_id,thread_id,target_run_id,to_provider_thread_id,strategy,status,updated_at,payload_json)
+        VALUES (?,?,?,?,'manual_context','ready',?,?)`).run(handoff.id, threadId, "run-1", provider.id, "2026-01-02T00:00:00.000Z", JSON.stringify(handoff));
+      expect((await inspectLinkedThreads(paths)).threads[0]).toMatchObject({
+        migration: { status: "continued", handoffIds: ["cutover-handoff"] },
+      });
+      db.prepare("UPDATE orchestration_v2_projection_context_handoffs SET payload_json=json_set(payload_json,'$.toProviderThreadId','unrelated')").run();
+      expect((await inspectLinkedThreads(paths)).threads[0]?.migration?.status).toBe("unverified");
+      db.prepare("UPDATE orchestration_v2_projection_threads SET deleted_at='deleted' WHERE thread_id=?").run(threadId);
+      expect((await inspectLinkedThreads(paths)).threads).toHaveLength(0);
+    } finally { db.close(); }
+  });
+
+  it("classifies and source-filters canonical history-only imports after collecting their identity", async () => {
+    const { paths, workspace } = await fixture(67);
+    const conversation = canonicalConversation(workspace);
+    await importConversations([{ conversation, resume: false }], paths, { dryRun: false, resume: false });
+    const db = new Database(paths.dbPath);
+    try { db.prepare("DELETE FROM orchestration_v2_projection_provider_threads").run(); }
+    finally { db.close(); }
+    const report = await inspectLinkedThreads(paths, { source: "codex" });
+    expect(report.threads).toMatchObject([{ mapping: "strong", origin: "imported", bindings: [{ nativeId: conversation.summary.id }] }]);
+  });
+
   it.each([62, 67])("reports strong V2 provider binding and import origin for migration %i", async (migration) => {
     const { paths, workspace } = await fixture(migration);
     const conversation = canonicalConversation(workspace);

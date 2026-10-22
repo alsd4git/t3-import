@@ -4,6 +4,15 @@ Validated locally on 21 October 2026 with Node.js 24.19.0. Package version
 `0.5.0-v2.1` is a local fork prerelease, not an upstream npm release.
 Synchronization is provider-to-T3 only. No reverse transcript writer is included.
 
+Subsequent checks on 22 October passed **719 tests**, typecheck, build and the
+[independent package installation check](package-validation.md). The read-only
+links report now separates retained V1 identities from current V2 bindings and
+first-run migration handoffs. The chooser reports per-row reasons and next
+actions. A [bounded live OpenCode continuation](continuation-validation-2026-10-22.md)
+confirmed reuse of an existing native session, while exposing T3's title-copy
+behavior on resume. These later checks do not broaden the historical claims
+below into a manual UI test of a newly imported conversation.
+
 ## Implemented
 
 - Separate official persistence runtimes for T3 0.1.0, migration 62, and 0.1.1,
