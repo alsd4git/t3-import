@@ -59,7 +59,7 @@ jobs:
           retention-days: 30
       - name: Publish exact release tarball to npm
         run: npm run release:ci -- publish
-      - name: Create or resume GitHub prerelease
+      - name: Create or resume GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: npm run release:ci -- github-release

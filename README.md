@@ -1,7 +1,7 @@
 # t3-import
 
 [![CI](https://github.com/alsd4git/t3-import/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/alsd4git/t3-import/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/alsd4git/t3-import?include_prereleases)](https://github.com/alsd4git/t3-import/releases)
+[![Release](https://img.shields.io/github/v/release/alsd4git/t3-import)](https://github.com/alsd4git/t3-import/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Import and sync local **Codex, Claude Code, and OpenCode** conversations into

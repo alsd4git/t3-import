@@ -130,10 +130,10 @@ async function githubRelease() {
       if (!String(error.stderrText ?? error.message).includes('404')) throw error;
     }
     if (!release) {
-      run('gh', ['release', 'create', tag, '--verify-tag', '--prerelease', '--title', `t3-import ${manifest.version}`, '--notes-file', join(out, 'RELEASE_NOTES.md')]);
+      run('gh', ['release', 'create', tag, '--verify-tag', '--latest', '--title', `t3-import ${manifest.version}`, '--notes-file', join(out, 'RELEASE_NOTES.md')]);
       release = JSON.parse(run('gh', ['api', `repos/${process.env.GITHUB_REPOSITORY}/releases/tags/${tag}`]));
     }
-    if (!release.prerelease || release.draft) throw new Error(`GitHub release ${tag} must be a published prerelease`);
+    if (release.prerelease || release.draft) throw new Error(`GitHub release ${tag} must be a published release`);
     for (const name of files) {
       const expected = await readFile(join(out, name));
       const asset = release.assets.find((item) => item.name === name);

@@ -43,7 +43,7 @@ that its commit is on `origin/main` before creating a release artifact.
 After CI passes, the workflow builds one npm tarball, SHA-256 checksum and
 changelog notes, then uploads those files as the `release-<tag>` workflow
 artifact before publication. It publishes that exact tarball publicly under
-`latest` with npm provenance. On success, it creates a GitHub prerelease with
+`latest` with npm provenance. On success, it creates a regular GitHub release marked Latest, with
 the same tarball and checksum. A rerun skips npm only when the already published
 version has identical SHA-512 integrity. Existing GitHub release assets are
 downloaded and byte-compared; mismatches stop the workflow, and missing assets
