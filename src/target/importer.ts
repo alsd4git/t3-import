@@ -394,12 +394,13 @@ export function acquireLock(paths: TargetPaths): () => void {
   return () => { try { unlinkSync(lockPath); } catch { /* best effort */ } };
 }
 
-export function createBackup(db: Database.Database, paths: TargetPaths): string {
+export async function createBackup(db: Database.Database, paths: TargetPaths): Promise<string> {
   const directory = join(paths.stateDir, "t3-import-backups");
   mkdirSync(directory, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/gu, "-");
   const destination = join(directory, `state-before-import-${stamp}.sqlite`);
-  db.prepare("VACUUM INTO ?").run(destination);
+  // SQLite backup preserves rowids used by T3's contentless FTS index.
+  await db.backup(destination);
   const backup = new Database(destination, { readonly: true, fileMustExist: true });
   try {
     const integrity = String(backup.pragma("integrity_check", { simple: true }));
@@ -546,7 +547,7 @@ export async function importConversations(
       return { schemaVersion: 1, status: aggregateStatus(results, options.dryRun), target: paths.dbPath, migration: schema.migration, backup: null, results, warnings: runWarnings };
     }
 
-    backup = createBackup(db, paths);
+    backup = await createBackup(db, paths);
     mkdirSync(paths.attachmentsDir, { recursive: true });
     const assets = materializeAssets(toWrite, paths, randomUUID());
     const ledger: LedgerRecord[] = [];

@@ -781,7 +781,7 @@ export async function syncConversations(selections: SyncSelection[], paths: Targ
       if (count > MAX_SAFE_IMPORT_EVENTS) throw safetyError(`Synchronization would append ${count} events, exceeding the safe one-launch limit of ${MAX_SAFE_IMPORT_EVENTS}. Sync fewer conversations at a time.`);
     }
     if (options.dryRun) return { schemaVersion: 1, status: aggregate(plans.map((plan) => plan.result), true), target: paths.dbPath, migration: schema.migration, backup: null, results: plans.map((plan) => plan.result), warnings, hasConflicts: plans.some((plan) => hasConflict(plan.result.status)) };
-    if (t3Plans.length > 0) backup = createBackup(db, paths);
+    if (t3Plans.length > 0) backup = await createBackup(db, paths);
     const assets = eventPlans.length > 0 ? materializeAssets(eventPlans.map((plan) => plan.planned!), paths, randomUUID()) : { created: [] as string[], cleanup: () => {} };
     const ledgerRecords: LedgerRecord[] = [];
     try {

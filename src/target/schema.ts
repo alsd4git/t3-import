@@ -16,7 +16,7 @@ export function isV2Database(db: Database.Database): boolean {
 export function targetMigration(db: Database.Database): number {
   const row = db.prepare("SELECT COALESCE(MAX(migration_id), 0) migration FROM effect_sql_migrations").get() as { migration: number };
   if (!SUPPORTED_MIGRATIONS.some((migration) => migration === row.migration)) {
-    throw compatibilityError(`Unsupported T3 schema migration ${row.migration}; supported migrations are 40–54 (V1), 62 (T3 0.1.0 V2), and 67 (T3 0.1.1/0.1.2 V2).`);
+    throw compatibilityError(`Unsupported T3 schema migration ${row.migration}; supported migrations are 40–54 (V1), 62 (T3 0.1.0 V2), 67 (T3 0.1.1/0.1.2 V2), and 69 (T3 0.1.3 V2).`);
   }
   return row.migration;
 }
@@ -113,7 +113,21 @@ export function validateTargetDatabase(db: Database.Database): SchemaInfo {
     const recorded = db.prepare("SELECT migration_id id, name FROM effect_sql_migrations WHERE migration_id >= 55").all() as Array<{ id: number; name: string }>;
     if (recorded.length !== expected.size || recorded.some((row) => expected.get(row.id) !== row.name)) throw compatibilityError(`T3 V2 migration history does not match the pinned ${profile.release} release.`);
     const required = JSON.parse(readFileSync(new URL(`../../vendor/${profile.directory}/schema-columns.json`, import.meta.url), "utf8")) as Record<string, string[]>;
+    // Migration 69 deliberately succeeds without FTS5 on older SQLite builds.
+    // A present index must retain its shadow tables and maintenance triggers.
+    const searchTable = "orchestration_v2_message_search";
+    const hasSearch = names.has(searchTable);
+    const searchTables = Object.keys(required).filter((table) => table === searchTable || table.startsWith(`${searchTable}_`));
+    const searchTriggers = ["insert", "update", "delete"].map((suffix) => `${searchTable}_${suffix}`);
+    if (migration >= 69) {
+      const triggers = new Set((db.prepare("SELECT name FROM sqlite_master WHERE type='trigger'").all() as Array<{ name: string }>).map((row) => row.name));
+      if ((!hasSearch && (searchTables.some((table) => names.has(table)) || searchTriggers.some((trigger) => triggers.has(trigger))))
+        || (hasSearch && searchTriggers.some((trigger) => !triggers.has(trigger)))) {
+        throw compatibilityError("Incomplete T3 message search index; repair it with T3 before importing.");
+      }
+    }
     for (const [table, columns] of Object.entries(required)) {
+      if (!hasSearch && searchTables.includes(table)) continue;
       const available = new Set((db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((row) => row.name));
       for (const column of columns) if (!available.has(column)) throw compatibilityError(`Unsupported T3 V2 schema: ${table}.${column} is missing.`);
     }

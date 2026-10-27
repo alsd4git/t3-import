@@ -20,7 +20,7 @@ function mutate(dbPath: string, operation: (db: Database.Database) => void) {
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 describe("inspectRuntimeActivity", () => {
-  it.each([40, 67])("reports an idle V%i fixture", (migration) => {
+  it.each([40, 67, 69])("reports an idle V%i fixture", (migration) => {
     const paths = target(migration);
     const result = inspectRuntimeActivity(paths);
     expect(result.status).toBe("idle");

@@ -80,9 +80,11 @@ export async function createSchema(filename) {
   return Effect.runPromise(Effect.gen(function* () {
     yield* runMigrations();
     const sql = yield* SqlClient.SqlClient;
-    const rows = yield* sql`SELECT sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY type DESC, name`;
+    const rows = yield* sql`SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'view' THEN 1 WHEN 'trigger' THEN 2 ELSE 3 END, name`;
+    // Virtual tables create their own shadow tables when fixture DDL is replayed.
+    const shadows = new Set((yield* sql`PRAGMA table_list`).filter((row) => row.type === "shadow").map((row) => row.name));
     const migrations = yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`;
-    return { ddl: rows.map((row) => row.sql), migrations };
+    return { ddl: rows.filter((row) => !shadows.has(row.name)).map((row) => row.sql), migrations };
   }).pipe(Effect.provide(NodeSqliteClient.layer({ filename }))));
 }
 

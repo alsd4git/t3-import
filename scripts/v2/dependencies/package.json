@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "diff": "8.0.3",
     "mdast-util-directive": "3.1.0",
     "micromark-extension-directive": "4.0.0",
     "micromark-util-character": "2.1.1",

@@ -15,6 +15,7 @@ describe.each([
   { migration: 62, release: "0.1.0", directory: "t3-v010" },
   { migration: 67, release: "0.1.1", directory: "t3-v011" },
   { migration: 67, release: "0.1.2", directory: "t3-v012" },
+  { migration: 69, release: "0.1.3", directory: "t3-v013" },
 ])("T3 $release / V2 migration $migration", ({ migration, directory }) => {
 let root: string;
 let ledger: string | undefined;

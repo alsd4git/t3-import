@@ -276,7 +276,7 @@ export async function replaceConversations(selections: ReplaceSelection[], paths
       return { schemaVersion: 1, status: aggregate(results, options.dryRun), target: paths.dbPath, migration: schema.migration, backup: null, results, warnings, hasConflicts: results.some((result) => conflictStatuses.has(result.status)) };
     }
 
-    backup = createBackup(db, paths);
+    backup = await createBackup(db, paths);
     mkdirSync(paths.attachmentsDir, { recursive: true });
     const assets = materializeAssets(writable.map((plan) => plan.planned!), paths, randomUUID());
     const ledgerUpdates: Array<{ old: StoredLedgerRecord[]; next: LedgerRecord }> = [];

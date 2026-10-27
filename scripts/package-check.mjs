@@ -83,7 +83,7 @@ try {
   const ledger = join(temporaryRoot, "ledger");
   await Promise.all([mkdir(stateDirectory, { recursive: true }), mkdir(join(codexHome, "sessions", "2026", "10"), { recursive: true }), mkdir(workspace)]);
 
-  const runtime = await import(pathToFileURL(join(installedPackage, "vendor", "t3-v012", "runtime.mjs")).href);
+  const runtime = await import(pathToFileURL(join(installedPackage, "vendor", "t3-v013", "runtime.mjs")).href);
   const loggerMethods = ["debug", "info", "log", "warn", "error"].map((method) => [method, console[method].bind(console)]);
   for (const [method] of loggerMethods) console[method] = () => {};
   try {
@@ -124,7 +124,7 @@ try {
   // Let the verification process exit and unload the DLL before removing install/.
   run(process.execPath, [fileURLToPath(new URL("./package-database-check.mjs", import.meta.url)), join(installedPackage, "package.json"), stateDatabase]);
 
-  console.log(`Packed artifact ${metadata.name}@${metadata.version}: install, CLI help/version, and T3 0.1.2 import/sync passed.`);
+  console.log(`Packed artifact ${metadata.name}@${metadata.version}: install, CLI help/version, and T3 0.1.3 import/sync passed.`);
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
 }

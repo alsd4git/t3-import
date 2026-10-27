@@ -1,8 +1,21 @@
 # T3 compatibility validation
 
-The importer supports V1 database migrations 40–54 and T3 V2 migrations 62 and 67 explicitly. A supported number
+The importer supports V1 database migrations 40–54 and T3 V2 migrations 62, 67 and 69 explicitly. A supported number
 must also pass integrity and required-column checks. This is not a promise that
 every future T3 commit retaining the same migration number will remain compatible.
+
+## T3 0.1.3 / migration 69
+
+The migration 69 writer pins `v0.1.3` to
+`d2c440312e5f39d59827ed466838a623516454d6` in `vendor/t3-v013`.
+Migration 68 adds the shell stop-request index; migration 69 adds optional
+FTS5 message search and its insert/update/delete triggers. Validation accepts
+T3's supported fallback without the search extension, and refuses a present
+index with missing maintenance triggers or shadow-table columns.
+
+Recovery backups use SQLite's backup API to preserve message rowids referenced
+by the contentless search index. The integration matrix retains all earlier
+release runtimes. See the [0.1.3 validation record](v013-validation.md).
 
 ## T3 0.1.1–0.1.2 / migration 67
 

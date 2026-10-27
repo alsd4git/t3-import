@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.3-alsd.1
+
+- Support T3 0.1.3 migration 69 with the pinned official persistence runtime,
+  retaining compatibility with earlier supported versions.
+- Validate optional FTS5 message search and its maintenance triggers; test
+  search results after import, sync and replacement.
+- Preserve message rowids in SQLite recovery backups so restored search indexes
+  continue to reference the correct messages.
+
 ## 0.1.2-alsd.1
 
 - Read Codex `.jsonl.zst` rollouts directly, preserving content fingerprints and
