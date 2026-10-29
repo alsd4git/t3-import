@@ -2,13 +2,14 @@ import Database from "better-sqlite3";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { canonicalConversation, createTarget } from "./helpers.js";
 import { createBackup, importConversations } from "../src/target/importer.js";
 import { syncConversations } from "../src/target/sync.js";
 import { replaceConversations } from "../src/target/replace.js";
 import { validateTargetDatabase } from "../src/target/schema.js";
 
+describe.each([69, 72])("message search at migration %i", (migration) => {
 let root: string;
 let previousLedger: string | undefined;
 beforeEach(() => {
@@ -29,7 +30,7 @@ function matches(db: Database.Database, term: string): number {
 }
 
 it("indexes imported, synchronized and replaced messages through official triggers", async () => {
-  const paths = createTarget(root, 69);
+  const paths = createTarget(root, migration);
   const conversation = canonicalConversation(root);
   conversation.threads[0]!.turns[0]!.assistant[0]!.text = "Searchable original answer";
   await importConversations([{ conversation, resume: true }], paths, { dryRun: false, resume: true });
@@ -59,20 +60,20 @@ it("indexes imported, synchronized and replaced messages through official trigge
   } finally { replaced.close(); }
 });
 
-it("imports into migration 69 without the optional FTS extension", async () => {
-  const paths = createTarget(root, 69);
+it("imports without the optional FTS extension", async () => {
+  const paths = createTarget(root, migration);
   const db = new Database(paths.dbPath);
   db.exec(`DROP TRIGGER orchestration_v2_message_search_insert;
     DROP TRIGGER orchestration_v2_message_search_update;
     DROP TRIGGER orchestration_v2_message_search_delete;
     DROP TABLE orchestration_v2_message_search`);
-  expect(validateTargetDatabase(db).migration).toBe(69);
+  expect(validateTargetDatabase(db).migration).toBe(migration);
   db.close();
   expect((await importConversations([{ conversation: canonicalConversation(root), resume: true }], paths, { dryRun: false, resume: true })).status).toBe("imported");
 });
 
 it("refuses an incomplete FTS extension before writing", async () => {
-  const paths = createTarget(root, 69);
+  const paths = createTarget(root, migration);
   const db = new Database(paths.dbPath);
   db.exec("DROP TRIGGER orchestration_v2_message_search_update");
   db.close();
@@ -82,7 +83,7 @@ it("refuses an incomplete FTS extension before writing", async () => {
 });
 
 it("preserves message rowids and FTS results in recovery backups", async () => {
-  const paths = createTarget(root, 69);
+  const paths = createTarget(root, migration);
   const conversation = canonicalConversation(root);
   conversation.threads[0]!.turns[0]!.assistant[0]!.text = "Searchable recovery answer";
   await importConversations([{ conversation, resume: true }], paths, { dryRun: false, resume: true });
@@ -99,4 +100,6 @@ it("preserves message rowids and FTS results in recovery backups", async () => {
       expect(backup.pragma("integrity_check", { simple: true })).toBe("ok");
     } finally { backup.close(); }
   } finally { db.close(); }
+});
+
 });

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.5-alsd.1
+
+- Support T3 0.1.4 and 0.1.5 migration 72 using their pinned official persistence
+  runtimes, retaining earlier supported releases.
+- Preserve peer-link configuration and thread link-origin metadata during sync.
+- Treat waiting environment-link requests and remote tasks with owed stops as
+  unfinished work, refusing automatic service pause and affected thread sync/replace.
+- Verify message search, recovery backups and the installed package on schema 72.
+
 ## 0.1.3-alsd.1
 
 - Support T3 0.1.3 migration 69 with the pinned official persistence runtime,

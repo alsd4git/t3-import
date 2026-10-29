@@ -1,8 +1,23 @@
 # T3 compatibility validation
 
-The importer supports V1 database migrations 40–54 and T3 V2 migrations 62, 67 and 69 explicitly. A supported number
+The importer supports V1 database migrations 40–54 and T3 V2 migrations 62, 67, 69 and 72 explicitly. A supported number
 must also pass integrity and required-column checks. This is not a promise that
 every future T3 commit retaining the same migration number will remain compatible.
+
+## T3 0.1.4–0.1.5 / migration 72
+
+Migration 70 adds `peer_environment_links`, migration 71 adds its `fenced`
+column, and migration 72 indexes waiting link-request turn items. Both official
+release schemas generate identical DDL and normalized migration history. The
+migration 72 writer uses `vendor/t3-v015`; `vendor/t3-v014` remains a test
+reference. Both use Effect 4.0.5 through the existing dependency alias.
+
+Peer configuration is preserved. Sync retains thread `linkOrigin` and
+`delegatedFrom` metadata through the official event sink. Waiting link requests
+and remote delegated tasks with undelivered stop requests count as unfinished
+work, including tasks that already have a result. Service maintenance refuses
+to pause in these states; synchronization and replacement refuse affected
+threads. See the [0.1.5 validation record](v015-validation.md).
 
 ## T3 0.1.3 / migration 69
 

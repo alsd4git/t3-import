@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import type { TargetPaths } from "../core/types.js";
 import { isV2Database, targetMigration } from "./schema.js";
+import { openRemoteDelegatedTasks } from "./v2Work.js";
 
 export interface RuntimeActivity {
   status: "idle" | "busy" | "unknown";
@@ -112,11 +113,14 @@ function inspectV2(db: Database.Database, counts: Record<string, number>, work: 
   const activeSessions = rows(db, "SELECT provider_session_id FROM orchestration_v2_projection_provider_sessions WHERE status IN ('starting','running','waiting')");
   const requests = rows(db, "SELECT runtime_request_id FROM orchestration_v2_projection_runtime_requests WHERE status='pending'");
   const launchWorkflows = rows(db, "SELECT command_id FROM orchestration_v2_thread_launch_workflows WHERE status IN ('pending','running')");
-  const activeItems = rows(db, "SELECT turn_item_id FROM orchestration_v2_projection_turn_items WHERE status IN ('pending','running','waiting') AND type IN ('command_execution','background_command','monitor','background_task','subagent')");
+  const activeItems = rows(db, "SELECT turn_item_id FROM orchestration_v2_projection_turn_items WHERE status IN ('pending','running','waiting') AND type IN ('command_execution','background_command','monitor','background_task','subagent','link_request')");
   const badPendingTasks = countRows(db, `SELECT COUNT(*) count FROM orchestration_v2_projection_provider_threads WHERE CASE WHEN json_type(payload_json,'$.pendingBackgroundTasks') IS NULL THEN 0 WHEN json_type(payload_json,'$.pendingBackgroundTasks')<>'array' THEN 1 ELSE EXISTS (SELECT 1 FROM json_each(payload_json,'$.pendingBackgroundTasks') task WHERE json_type(task.value)<>'object' OR json_type(task.value,'$.taskId') IS NOT 'text' OR length(json_extract(task.value,'$.taskId'))=0) END`);
   if (badPendingTasks > 0) throw new Error("Invalid provider-thread pending background tasks");
   const backgroundTasks = rows(db, `SELECT provider_thread_id, json_extract(task.value,'$.taskId') task_id FROM orchestration_v2_projection_provider_threads, json_each(orchestration_v2_projection_provider_threads.payload_json,'$.pendingBackgroundTasks') task`);
   const pendingBackgroundTasks = backgroundTasks.length;
+  const remoteTasks = openRemoteDelegatedTasks(db);
+  setCount(counts, "v2_open_remote_tasks", remoteTasks.length);
+  for (const task of remoteTasks) work.push(`v2-remote:${task.threadId}:${task.taskId}`);
   for (const task of backgroundTasks) work.push(`v2-background:${task.provider_thread_id}:${task.task_id}`);
   setCount(counts, "v2_nonterminal_runs", activeRuns.length);
   setCount(counts, "v2_nonterminal_attempts", activeAttempts.length);

@@ -73,14 +73,14 @@ describe.each(SUPPORTED_MIGRATIONS)("migration %i compatibility", (migration) =>
   });
 });
 
-it.each([39, 55])("rejects unsupported migration %i without writes", async (migration) => {
+it.each([39, 55, 70, 71, 73])("rejects unsupported migration %i without writes", async (migration) => {
   const paths = createTarget(join(root, "t3"), migration);
   const before = readFileSync(paths.dbPath);
   for (const operation of [
     () => importConversations([], paths, { dryRun: false, resume: true }),
     () => syncConversations([], paths, { dryRun: false }),
     () => replaceConversations([], paths, { dryRun: false }),
-  ]) await expect(operation()).rejects.toMatchObject({ exitCode: 3, message: `Unsupported T3 schema migration ${migration}; supported migrations are 40–54 (V1), 62 (T3 0.1.0 V2), 67 (T3 0.1.1/0.1.2 V2), and 69 (T3 0.1.3 V2).` });
+  ]) await expect(operation()).rejects.toMatchObject({ exitCode: 3, message: `Unsupported T3 schema migration ${migration}; supported migrations are 40–54 (V1), 62 (T3 0.1.0 V2), 67 (T3 0.1.1/0.1.2 V2), 69 (T3 0.1.3 V2), and 72 (T3 0.1.4/0.1.5 V2).` });
   expect(readFileSync(paths.dbPath)).toEqual(before);
   expect(existsSync(join(root, "ledger"))).toBe(false);
   expect(existsSync(paths.attachmentsDir)).toBe(false);
