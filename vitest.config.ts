@@ -7,7 +7,7 @@ export default defineConfig({
     maxWorkers: 2,
     minWorkers: 1,
     // The SQLite integration cases include real backups and filesystem writes.
-    // Windows hosted runners can exceed Vitest's 5s default on the same cases.
-    testTimeout: process.platform === "win32" ? 20_000 : 5_000,
+    // Multi-step sync/replace cases exceed 20s on hosted Windows runners.
+    testTimeout: process.platform === "win32" ? 60_000 : 5_000,
   },
 });

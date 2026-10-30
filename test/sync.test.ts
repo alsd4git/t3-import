@@ -152,10 +152,7 @@ function advancedConversation(workspace: string, sourceThread = canonicalThread(
   return conversation;
 }
 
-describe.each(SUPPORTED_MIGRATIONS.filter((migration) => migration < 55))("migration-%i V1 incremental synchronization", {
-  // Several real import/backup/sync operations can exceed 20s on hosted Windows.
-  timeout: process.platform === "win32" ? 60_000 : 5_000,
-}, (migration) => {
+describe.each(SUPPORTED_MIGRATIONS.filter((migration) => migration < 55))("migration-%i V1 incremental synchronization", (migration) => {
   beforeEach(() => { fixtureMigration = migration; });
   it("appends a Codex suffix and a repeated sync is a no-op", async () => {
     const { workspace, paths } = await importedFixture("t3-sync-codex-");
