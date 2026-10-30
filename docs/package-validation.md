@@ -19,8 +19,11 @@ No live `.t3`, Codex, Claude Code, or OpenCode data is accessed.
 Database assertions run in a child process, which unloads the installed native
 SQLite addon before cleanup. This matters on Windows, where a loaded `.node`
 library cannot be deleted even after closing its database connection. Windows
-integration tests have a 20-second per-case budget for real SQLite backups and
-filesystem work; other platforms retain the five-second default.
+integration tests normally have a 20-second per-case budget. The V1 sync suite
+has a 60-second Windows budget because a case can perform several durable
+imports, backups and syncs. Other platforms retain the five-second default.
+Fixture writes and ledger schema upgrades use transactions to avoid a durable
+flush per setup statement. Retries are not enabled.
 
 CI runs this check on Windows, macOS, and Ubuntu with Node.js 22 and 24. It also
 runs typecheck and the full test suite in each matrix job. The CI workflow also

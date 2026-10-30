@@ -70,70 +70,73 @@ async function nativeCodexFixture(prefix: string, options: { streamed?: boolean;
   const wrapperId = "99999999-9999-4999-8999-999999999999";
   const db = new Database(paths.dbPath);
   try {
-    const original = db.prepare("SELECT payload_json payload FROM orchestration_events WHERE stream_id=? AND event_type='thread.created'").get(sourceId) as { payload: string };
-    const projectId = JSON.parse(original.payload).projectId as string;
-    if (options.scratch) {
-      const project = db.prepare("SELECT event_id id,payload_json payload FROM orchestration_events WHERE stream_id=? AND event_type='project.created'").get(projectId) as { id: string; payload: string };
-      db.prepare("UPDATE orchestration_events SET payload_json=? WHERE event_id=?").run(JSON.stringify({ ...JSON.parse(project.payload), workspaceRoot: join(root, "scratch") }), project.id);
-    }
-    db.prepare("DELETE FROM orchestration_events WHERE aggregate_kind='thread' AND stream_id=?").run(sourceId);
-    db.prepare("DELETE FROM provider_session_runtime WHERE thread_id=?").run(sourceId);
-    const insert = db.prepare(`INSERT INTO orchestration_events (
-      event_id, aggregate_kind, stream_id, stream_version, event_type, occurred_at,
-      actor_kind, payload_json, metadata_json
-    ) VALUES (?, 'thread', ?, ?, ?, ?, ?, ?, ?)`);
-    let version = 0;
-    const add = (eventId: string, type: string, occurredAt: string, actor: string, payload: unknown, metadata: unknown = {}) => {
-      insert.run(eventId, wrapperId, version++, type, occurredAt, actor, JSON.stringify(payload), JSON.stringify(metadata));
-    };
-    const turn = initial.turns[0]!;
-    const messageId = "native-user-message";
-    add("native-thread-created", "thread.created", initial.createdAt, "server", {
-      threadId: wrapperId, projectId, title: initial.title,
-      modelSelection: { instanceId: "codex", model: initial.model, options: [] },
-      runtimeMode: "full-access", interactionMode: "default", branch: null, worktreePath: null,
-      createdAt: initial.createdAt, updatedAt: initial.createdAt,
-    });
-    add("native-user", "thread.message-sent", turn.user.timestamp, "client", {
-      threadId: wrapperId, messageId, role: "user", text: visiblePrompt, attachments: [], turnId: null,
-      streaming: false, createdAt: turn.user.timestamp, updatedAt: turn.user.timestamp,
-    });
-    add("native-turn-start", "thread.turn-start-requested", turn.startedAt, "client", {
-      threadId: wrapperId, messageId, modelSelection: { instanceId: "codex", model: initial.model, options: [] },
-      titleSeed: "Hello", runtimeMode: "full-access", interactionMode: "default", createdAt: turn.startedAt,
-    });
-    add("native-running", "thread.session-set", turn.startedAt, "provider", {
-      threadId: wrapperId, session: { threadId: wrapperId, status: "running", providerName: "codex", providerInstanceId: "codex", activeTurnId: turn.id },
-    }, { adapterKey: "codex", providerTurnId: turn.id });
-    const answer = turn.assistant[0]!.text;
-    add("native-assistant", "thread.message-sent", turn.assistant[0]!.timestamp, "provider", {
-      threadId: wrapperId, messageId: "native-assistant-message", role: "assistant", text: turn.assistant[0]!.text,
-      turnId: turn.id, streaming: false, createdAt: turn.assistant[0]!.timestamp, updatedAt: turn.assistant[0]!.timestamp,
-    }, { adapterKey: "codex", providerTurnId: turn.id });
-    if (options.streamed || options.steered) {
-      const first = db.prepare("SELECT payload_json payload FROM orchestration_events WHERE event_id='native-assistant'").get() as { payload: string };
-      const payload = JSON.parse(first.payload);
-      db.prepare("UPDATE orchestration_events SET payload_json=? WHERE event_id='native-assistant'").run(JSON.stringify({ ...payload, text: answer.slice(0, 1), streaming: true }));
-      if (options.steered) {
-        for (const [index, text] of ["Steer", "Again"].entries()) {
-          add(`native-steer-${index}`, "thread.message-sent", turn.user.timestamp, "client", {
-            threadId: wrapperId, messageId: `native-steer-${index}`, role: "user", text,
-            attachments: [], turnId: null, streaming: false, createdAt: turn.user.timestamp, updatedAt: turn.user.timestamp,
-          });
-        }
+    // The synthetic provider history is one fixture, not a series of durable writes.
+    db.transaction(() => {
+      const original = db.prepare("SELECT payload_json payload FROM orchestration_events WHERE stream_id=? AND event_type='thread.created'").get(sourceId) as { payload: string };
+      const projectId = JSON.parse(original.payload).projectId as string;
+      if (options.scratch) {
+        const project = db.prepare("SELECT event_id id,payload_json payload FROM orchestration_events WHERE stream_id=? AND event_type='project.created'").get(projectId) as { id: string; payload: string };
+        db.prepare("UPDATE orchestration_events SET payload_json=? WHERE event_id=?").run(JSON.stringify({ ...JSON.parse(project.payload), workspaceRoot: join(root, "scratch") }), project.id);
       }
-      add("native-assistant-delta", "thread.message-sent", turn.assistant[0]!.timestamp, "provider", { ...payload, text: answer.slice(1), streaming: true });
-      add("native-assistant-final", "thread.message-sent", turn.assistant[0]!.timestamp, "provider", { ...payload, text: "", streaming: false });
-    }
-    add("native-ready", "thread.session-set", turn.completedAt!, "provider", {
-      threadId: wrapperId, session: { threadId: wrapperId, status: "ready", providerName: "codex", providerInstanceId: "codex", activeTurnId: null },
-    }, { adapterKey: "codex", providerTurnId: turn.id });
-    db.prepare(`INSERT INTO provider_session_runtime (
-      thread_id, provider_name, provider_instance_id, adapter_key, runtime_mode,
-      status, last_seen_at, resume_cursor_json, runtime_payload_json
-    ) VALUES (?, 'codex', 'codex', 'codex', 'full-access', 'stopped', ?, ?, ?)`).run(
-      wrapperId, turn.completedAt, JSON.stringify({ threadId: sourceId }), JSON.stringify(options.scratch ? { cwd: workspace } : {}),
-    );
+      db.prepare("DELETE FROM orchestration_events WHERE aggregate_kind='thread' AND stream_id=?").run(sourceId);
+      db.prepare("DELETE FROM provider_session_runtime WHERE thread_id=?").run(sourceId);
+      const insert = db.prepare(`INSERT INTO orchestration_events (
+        event_id, aggregate_kind, stream_id, stream_version, event_type, occurred_at,
+        actor_kind, payload_json, metadata_json
+      ) VALUES (?, 'thread', ?, ?, ?, ?, ?, ?, ?)`);
+      let version = 0;
+      const add = (eventId: string, type: string, occurredAt: string, actor: string, payload: unknown, metadata: unknown = {}) => {
+        insert.run(eventId, wrapperId, version++, type, occurredAt, actor, JSON.stringify(payload), JSON.stringify(metadata));
+      };
+      const turn = initial.turns[0]!;
+      const messageId = "native-user-message";
+      add("native-thread-created", "thread.created", initial.createdAt, "server", {
+        threadId: wrapperId, projectId, title: initial.title,
+        modelSelection: { instanceId: "codex", model: initial.model, options: [] },
+        runtimeMode: "full-access", interactionMode: "default", branch: null, worktreePath: null,
+        createdAt: initial.createdAt, updatedAt: initial.createdAt,
+      });
+      add("native-user", "thread.message-sent", turn.user.timestamp, "client", {
+        threadId: wrapperId, messageId, role: "user", text: visiblePrompt, attachments: [], turnId: null,
+        streaming: false, createdAt: turn.user.timestamp, updatedAt: turn.user.timestamp,
+      });
+      add("native-turn-start", "thread.turn-start-requested", turn.startedAt, "client", {
+        threadId: wrapperId, messageId, modelSelection: { instanceId: "codex", model: initial.model, options: [] },
+        titleSeed: "Hello", runtimeMode: "full-access", interactionMode: "default", createdAt: turn.startedAt,
+      });
+      add("native-running", "thread.session-set", turn.startedAt, "provider", {
+        threadId: wrapperId, session: { threadId: wrapperId, status: "running", providerName: "codex", providerInstanceId: "codex", activeTurnId: turn.id },
+      }, { adapterKey: "codex", providerTurnId: turn.id });
+      const answer = turn.assistant[0]!.text;
+      add("native-assistant", "thread.message-sent", turn.assistant[0]!.timestamp, "provider", {
+        threadId: wrapperId, messageId: "native-assistant-message", role: "assistant", text: turn.assistant[0]!.text,
+        turnId: turn.id, streaming: false, createdAt: turn.assistant[0]!.timestamp, updatedAt: turn.assistant[0]!.timestamp,
+      }, { adapterKey: "codex", providerTurnId: turn.id });
+      if (options.streamed || options.steered) {
+        const first = db.prepare("SELECT payload_json payload FROM orchestration_events WHERE event_id='native-assistant'").get() as { payload: string };
+        const payload = JSON.parse(first.payload);
+        db.prepare("UPDATE orchestration_events SET payload_json=? WHERE event_id='native-assistant'").run(JSON.stringify({ ...payload, text: answer.slice(0, 1), streaming: true }));
+        if (options.steered) {
+          for (const [index, text] of ["Steer", "Again"].entries()) {
+            add(`native-steer-${index}`, "thread.message-sent", turn.user.timestamp, "client", {
+              threadId: wrapperId, messageId: `native-steer-${index}`, role: "user", text,
+              attachments: [], turnId: null, streaming: false, createdAt: turn.user.timestamp, updatedAt: turn.user.timestamp,
+            });
+          }
+        }
+        add("native-assistant-delta", "thread.message-sent", turn.assistant[0]!.timestamp, "provider", { ...payload, text: answer.slice(1), streaming: true });
+        add("native-assistant-final", "thread.message-sent", turn.assistant[0]!.timestamp, "provider", { ...payload, text: "", streaming: false });
+      }
+      add("native-ready", "thread.session-set", turn.completedAt!, "provider", {
+        threadId: wrapperId, session: { threadId: wrapperId, status: "ready", providerName: "codex", providerInstanceId: "codex", activeTurnId: null },
+      }, { adapterKey: "codex", providerTurnId: turn.id });
+      db.prepare(`INSERT INTO provider_session_runtime (
+        thread_id, provider_name, provider_instance_id, adapter_key, runtime_mode,
+        status, last_seen_at, resume_cursor_json, runtime_payload_json
+      ) VALUES (?, 'codex', 'codex', 'codex', 'full-access', 'stopped', ?, ?, ?)`).run(
+        wrapperId, turn.completedAt, JSON.stringify({ threadId: sourceId }), JSON.stringify(options.scratch ? { cwd: workspace } : {}),
+      );
+    })();
   } finally { db.close(); }
   process.env.T3_IMPORT_DATA_DIR = join(root, "native-ledger");
   caughtUp(paths);
@@ -149,7 +152,10 @@ function advancedConversation(workspace: string, sourceThread = canonicalThread(
   return conversation;
 }
 
-describe.each(SUPPORTED_MIGRATIONS.filter((migration) => migration < 55))("migration-%i V1 incremental synchronization", (migration) => {
+describe.each(SUPPORTED_MIGRATIONS.filter((migration) => migration < 55))("migration-%i V1 incremental synchronization", {
+  // Several real import/backup/sync operations can exceed 20s on hosted Windows.
+  timeout: process.platform === "win32" ? 60_000 : 5_000,
+}, (migration) => {
   beforeEach(() => { fixtureMigration = migration; });
   it("appends a Codex suffix and a repeated sync is a no-op", async () => {
     const { workspace, paths } = await importedFixture("t3-sync-codex-");
