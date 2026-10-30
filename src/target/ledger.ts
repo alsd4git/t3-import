@@ -45,42 +45,51 @@ function openLedger(): Database.Database {
   const directory = ledgerDirectory();
   mkdirSync(directory, { recursive: true });
   const db = new Database(join(directory, "ledger.sqlite"));
-  db.pragma("journal_mode = WAL");
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS imports (
-      target_id TEXT NOT NULL,
-      source TEXT NOT NULL,
-      source_session_id TEXT NOT NULL,
-      source_key TEXT NOT NULL,
-      source_fingerprint TEXT NOT NULL,
-      project_id TEXT NOT NULL,
-      thread_id TEXT NOT NULL,
-      imported_at TEXT NOT NULL,
-      importer_version TEXT NOT NULL,
-      migration INTEGER NOT NULL,
-      first_sequence INTEGER NOT NULL,
-      last_sequence INTEGER NOT NULL,
-      resumable INTEGER NOT NULL,
-      backup_path TEXT NOT NULL,
-      warnings_json TEXT NOT NULL,
-      PRIMARY KEY (target_id, source_key, thread_id)
-    )
-  `);
-  const columns = new Set((db.prepare("PRAGMA table_info(imports)").all() as Array<{ name: string }>).map((row) => row.name));
-  const additions: Array<[string, string]> = [
-    ["identity_seed", "TEXT"],
-    ["current_source_key", "TEXT"],
-    ["source_leaf_id", "TEXT"],
-    ["source_title", "TEXT"],
-    ["checkpoint_version", "INTEGER"],
-    ["checkpoint_json", "TEXT"],
-    ["synced_at", "TEXT"],
-    ["is_canonical", "INTEGER"],
-    ["superseded_by_thread_id", "TEXT"],
-    ["replaced_at", "TEXT"],
-  ];
-  for (const [name, type] of additions) if (!columns.has(name)) db.exec(`ALTER TABLE imports ADD COLUMN ${name} ${type}`);
-  return db;
+  try {
+    db.pragma("journal_mode = WAL");
+    // Schema creation and legacy-column upgrades commit together, avoiding a
+    // separate durable disk flush for each ALTER TABLE on first use.
+    db.transaction(() => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS imports (
+          target_id TEXT NOT NULL,
+          source TEXT NOT NULL,
+          source_session_id TEXT NOT NULL,
+          source_key TEXT NOT NULL,
+          source_fingerprint TEXT NOT NULL,
+          project_id TEXT NOT NULL,
+          thread_id TEXT NOT NULL,
+          imported_at TEXT NOT NULL,
+          importer_version TEXT NOT NULL,
+          migration INTEGER NOT NULL,
+          first_sequence INTEGER NOT NULL,
+          last_sequence INTEGER NOT NULL,
+          resumable INTEGER NOT NULL,
+          backup_path TEXT NOT NULL,
+          warnings_json TEXT NOT NULL,
+          PRIMARY KEY (target_id, source_key, thread_id)
+        )
+      `);
+      const columns = new Set((db.prepare("PRAGMA table_info(imports)").all() as Array<{ name: string }>).map((row) => row.name));
+      const additions: Array<[string, string]> = [
+        ["identity_seed", "TEXT"],
+        ["current_source_key", "TEXT"],
+        ["source_leaf_id", "TEXT"],
+        ["source_title", "TEXT"],
+        ["checkpoint_version", "INTEGER"],
+        ["checkpoint_json", "TEXT"],
+        ["synced_at", "TEXT"],
+        ["is_canonical", "INTEGER"],
+        ["superseded_by_thread_id", "TEXT"],
+        ["replaced_at", "TEXT"],
+      ];
+      for (const [name, type] of additions) if (!columns.has(name)) db.exec(`ALTER TABLE imports ADD COLUMN ${name} ${type}`);
+    })();
+    return db;
+  } catch (error) {
+    db.close();
+    throw error;
+  }
 }
 
 export function recordImports(records: LedgerRecord[]): void {
