@@ -1,6 +1,6 @@
 {
   "name": "@alsdd/t3-import",
-  "version": "0.1.5-alsd.1",
+  "version": "0.1.6-alsd.1",
   "description": "Import and sync Codex, Claude Code, and OpenCode conversations into T3 Code",
   "keywords": [
     "t3code",
@@ -37,6 +37,7 @@
     "vendor/t3-v013",
     "vendor/t3-v014",
     "vendor/t3-v015",
+    "vendor/t3-v016",
     "README.md",
     "CHANGELOG.md",
     "assets/fork-demo.png",

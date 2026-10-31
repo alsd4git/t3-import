@@ -9,7 +9,7 @@ try {
   if (integrity !== "ok") throw new Error(`Synthetic T3 database integrity check returned ${integrity}.`);
   if (database.pragma("foreign_key_check").length) throw new Error("Synthetic T3 database has invalid foreign keys.");
   const migration = database.prepare("SELECT MAX(migration_id) migration FROM effect_sql_migrations").get().migration;
-  if (migration !== 72) throw new Error(`Synthetic T3 database used migration ${migration}; expected 72.`);
+  if (migration !== 76) throw new Error(`Synthetic T3 database used migration ${migration}; expected 76.`);
   const messageCount = database.prepare("SELECT COUNT(*) count FROM orchestration_v2_projection_messages").get().count;
   if (messageCount !== 4) throw new Error(`Packed CLI import/sync produced ${messageCount} messages; expected 4.`);
   const matches = database.prepare("SELECT COUNT(*) count FROM orchestration_v2_message_search WHERE orchestration_v2_message_search MATCH 'Synthetic'").get().count;

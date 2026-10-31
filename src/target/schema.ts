@@ -16,7 +16,7 @@ export function isV2Database(db: Database.Database): boolean {
 export function targetMigration(db: Database.Database): number {
   const row = db.prepare("SELECT COALESCE(MAX(migration_id), 0) migration FROM effect_sql_migrations").get() as { migration: number };
   if (!SUPPORTED_MIGRATIONS.some((migration) => migration === row.migration)) {
-    throw compatibilityError(`Unsupported T3 schema migration ${row.migration}; supported migrations are 40–54 (V1), 62 (T3 0.1.0 V2), 67 (T3 0.1.1/0.1.2 V2), 69 (T3 0.1.3 V2), and 72 (T3 0.1.4/0.1.5 V2).`);
+    throw compatibilityError(`Unsupported T3 schema migration ${row.migration}; supported migrations are 40–54 (V1), 62 (T3 0.1.0 V2), 67 (T3 0.1.1/0.1.2 V2), 69 (T3 0.1.3 V2), 72 (T3 0.1.4/0.1.5 V2), and 76 (T3 0.1.6 V2).`);
   }
   return row.migration;
 }

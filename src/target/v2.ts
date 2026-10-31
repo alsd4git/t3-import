@@ -7,7 +7,7 @@ import type { CanonicalThread } from "../core/types.js";
 import { threadWorkingDirectory } from "./destination.js";
 import { targetMigration } from "./schema.js";
 import { v2Profiles } from "./v2Profiles.js";
-import { openRemoteDelegatedTasks } from "./v2Work.js";
+import { openRemoteDelegatedTasks, pendingSubagentDeliveries } from "./v2Work.js";
 import { sourceDriver, nativeSessionId } from "../core/providers.js";
 
 type Json = Record<string, unknown>;
@@ -43,7 +43,8 @@ export function assertV2ThreadSettled(db: Database.Database, threadId: string): 
   const nativeBackgroundWork = v2ProviderThreads(db, threadId).some((row) => Array.isArray(row.pendingBackgroundTasks) && row.pendingBackgroundTasks.length > 0);
   const waitingLink = db.prepare("SELECT 1 FROM orchestration_v2_projection_turn_items WHERE thread_id=? AND type='link_request' AND status='waiting' LIMIT 1").get(threadId);
   const openRemoteTask = openRemoteDelegatedTasks(db, threadId).length > 0;
-  if (activeRun || activeSession || pendingEffect || nativeBackgroundWork || waitingLink || openRemoteTask) throw safetyError("T3 V2 has unfinished work for this thread. Settle or stop it in T3 before synchronizing or replacing its history.");
+  const pendingDelivery = pendingSubagentDeliveries(db, threadId).length > 0;
+  if (activeRun || activeSession || pendingEffect || nativeBackgroundWork || waitingLink || openRemoteTask || pendingDelivery) throw safetyError("T3 V2 has unfinished work for this thread. Settle or stop it in T3 before synchronizing or replacing its history.");
 }
 
 export function v2ProviderThreads(db: Database.Database, threadId?: string): Json[] {

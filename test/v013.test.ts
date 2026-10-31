@@ -9,7 +9,7 @@ import { syncConversations } from "../src/target/sync.js";
 import { replaceConversations } from "../src/target/replace.js";
 import { validateTargetDatabase } from "../src/target/schema.js";
 
-describe.each([69, 72])("message search at migration %i", (migration) => {
+describe.each([69, 72, 76])("message search at migration %i", (migration) => {
 let root: string;
 let previousLedger: string | undefined;
 beforeEach(() => {

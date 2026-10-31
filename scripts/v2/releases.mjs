@@ -5,4 +5,5 @@ export const releases = {
   "0.1.3": { directory: "t3-v013", migration: 69, commit: "d2c440312e5f39d59827ed466838a623516454d6", archiveSha256: "b3b74af1ecd365f163a14f201ba5141f293d950f6213a4f493cf88724ca3a3f8", effect: "4.0.5", effectPackage: "effect-v011" },
   "0.1.4": { directory: "t3-v014", migration: 72, commit: "783581d461dc72cdd8f78fc8abb4ad536dfc4547", archiveSha256: "05fe610790f19eda92e6105f2b06c85062921ebb7c935b221bce20b92b17f4c0", effect: "4.0.5", effectPackage: "effect-v011" },
   "0.1.5": { directory: "t3-v015", migration: 72, commit: "6d450a4284852af137b2f3407fddd89eb76e7644", archiveSha256: "2920ccdb457acd7c6f00ba95cd92fee3b58df1c6cc768ad2704ca34c1b378f93", effect: "4.0.5", effectPackage: "effect-v011" },
+  "0.1.6": { directory: "t3-v016", migration: 76, commit: "2359643cffa6ba9ee84d6f2694b935de54a8013e", archiveSha256: "1c08098314b6356942b3c13312ecb313b07d13de39261b6023cd8ec6b7991f1e", effect: "4.0.5", effectPackage: "effect-v011" },
 };

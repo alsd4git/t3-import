@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.6-alsd.1
+
+- Support T3 0.1.6 migration 76 with the pinned official persistence runtime,
+  retaining earlier supported releases.
+- Preserve project pin/archive state during import, sync and replacement.
+- Respect updated FTS triggers that exclude attachment-only placeholder prompts
+  without removing their transcript content.
+- Refuse service pause and affected thread sync/replace when terminal app-owned
+  tasks still have pending or claimed completion deliveries. Historical/native
+  tasks without delivery metadata remain idle.
+- Batch ledger schema upgrades in one durable transaction and stabilize Windows
+  integration checks without retries.
+
 ## 0.1.5-alsd.1
 
 - Support T3 0.1.4 and 0.1.5 migration 72 using their pinned official persistence

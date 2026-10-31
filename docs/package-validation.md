@@ -7,7 +7,7 @@ or install anything globally.
 
 The check packs the project, installs the tarball in a temporary directory, and
 runs the installed CLI's help and version commands. It then creates a synthetic
-T3 0.1.5 database with the pinned runtime included in the package, writes a
+T3 0.1.6 database with the pinned runtime included in the package, writes a
 synthetic compressed Codex rollout under a temporary `CODEX_HOME`, and invokes
 the installed CLI to import one turn. It then adds a matching plain rollout with
 a second turn and checks sync and repeated sync without duplicating history.
@@ -25,7 +25,7 @@ replacements. Other platforms retain the five-second default.
 Fixture writes and ledger schema upgrades use transactions to avoid a durable
 flush per setup statement. Retries are not enabled.
 
-CI runs this check on Windows, macOS, and Ubuntu with Node.js 22 and 24. It also
+CI runs this check on Windows, macOS, and Ubuntu with Node.js 22, 24 and 26. It also
 runs typecheck and the full test suite in each matrix job. The CI workflow also
 accepts manual dispatch for a chosen branch. Run the package check
 locally with a supported Node.js release:
@@ -34,5 +34,5 @@ locally with a supported Node.js release:
 npm run package:check
 ```
 
-Validated on macOS with Node.js 24.19.0 and 22.23.2 on 29 October 2026. These
+Validated on macOS with Node.js 22.23.2, 24.19.0 and 26.13.0 on 31 October 2026. These
 local results do not stand in for the Windows/Linux CI jobs.

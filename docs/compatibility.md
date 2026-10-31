@@ -1,8 +1,22 @@
 # T3 compatibility validation
 
-The importer supports V1 database migrations 40–54 and T3 V2 migrations 62, 67, 69 and 72 explicitly. A supported number
+The importer supports V1 database migrations 40–54 and T3 V2 migrations 62, 67, 69, 72 and 76 explicitly. A supported number
 must also pass integrity and required-column checks. This is not a promise that
 every future T3 commit retaining the same migration number will remain compatible.
+
+## T3 0.1.6 / migration 76
+
+The migration 76 writer pins `v0.1.6` to
+`2359643cffa6ba9ee84d6f2694b935de54a8013e` in `vendor/t3-v016`.
+Migration 73 indexes active turn items; migration 74 replaces message-search
+triggers to exclude attachment placeholders; migration 75 backfills the
+subagent completion-delivery column; migration 76 adds nullable project pin
+and archive timestamps.
+
+Terminal app-owned tasks with explicit pending/claimed completion deliveries
+remain unfinished work. The optional field's absence on legacy/native tasks
+does not imply pending work. Project pin/archive state is preserved without
+changing destination selection policy. See the [0.1.6 validation record](v016-validation.md).
 
 ## T3 0.1.4–0.1.5 / migration 72
 
