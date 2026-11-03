@@ -28,7 +28,7 @@ import { checkpointForThread } from "../core/checkpoint.js";
 import { sourceDriver } from "../core/providers.js";
 import { safetyError, writeError } from "../core/errors.js";
 import { resolveProviderSelection, type TargetOverrides } from "./config.js";
-import { assertT3Closed, validateTargetDatabase } from "./schema.js";
+import { openTargetReadSnapshot, assertT3Closed, validateTargetDatabase } from "./schema.js";
 import { recordImports, type LedgerRecord } from "./ledger.js";
 import { importDestination, threadWorkingDirectory, validateDestinationOptions, type DestinationOptions } from "./destination.js";
 import { isV2Database } from "./schema.js";
@@ -445,9 +445,9 @@ export async function importConversations(
 ): Promise<ImportRunResult> {
   validateDestinationOptions(options);
   if (!existsSync(paths.dbPath)) throw safetyError(`T3 database not found: ${paths.dbPath}`);
-  await assertT3Closed(paths);
+  if (!options.dryRun) await assertT3Closed(paths);
   const releaseLock = options.dryRun ? () => {} : acquireLock(paths);
-  const db = new Database(paths.dbPath, { readonly: options.dryRun, fileMustExist: true });
+  const db = options.dryRun ? openTargetReadSnapshot(paths) : new Database(paths.dbPath, { fileMustExist: true });
   let backup: string | null = null;
   let v2Committed = false;
   const runWarnings: string[] = [];

@@ -1,10 +1,10 @@
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
 import { existsSync } from "node:fs";
 import type { SourceName, TargetPaths } from "../core/types.js";
 import { isObject, stringValue } from "../core/util.js";
 import { sourceDriver, sourceFromDriver, sourceNames } from "../core/providers.js";
 import { compatibilityError, safetyError } from "../core/errors.js";
-import { inspectRuntime, isV2Database, validateTargetDatabase } from "./schema.js";
+import { openTargetReadSnapshot, inspectRuntime, isV2Database, validateTargetDatabase } from "./schema.js";
 
 type MappingStatus = "strong" | "weak" | "historical" | "ambiguous" | "unlinked";
 type ThreadOrigin = "imported" | "native" | "unknown";
@@ -281,7 +281,7 @@ function buildRows(db: Database.Database, v2: boolean, options: InspectLinkedThr
 export async function inspectLinkedThreads(paths: TargetPaths, options: InspectLinkedThreadsOptions = {}): Promise<LinkedThreadsReport> {
   if (!existsSync(paths.dbPath)) throw safetyError(`T3 database not found: ${paths.dbPath}`);
   const runtime = await inspectRuntime(paths);
-  const db = new Database(paths.dbPath, { readonly: true, fileMustExist: true });
+  const db = openTargetReadSnapshot(paths);
   try {
     const schema = validateTargetDatabase(db);
     const v2 = isV2Database(db);

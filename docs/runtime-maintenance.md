@@ -1,6 +1,6 @@
 # Runtime maintenance
 
-By default, import, sync, replacement and cache reset require T3 to be closed.
+Actual import, sync, replacement and cache reset require T3 to be closed.
 Inspect a server without changing it or loading provider histories:
 
 ```sh
@@ -13,6 +13,31 @@ database snapshot. It checks unfinished runs and attempts, provider sessions,
 approvals/input requests, background work, launch workflows, effects and due or
 running scheduled tasks. Future schedules produce a warning and do not count as
 active work. Unsupported schemas and malformed activity data are `unknown`.
+
+## Read-only commands with T3 running
+
+`list`, `show`, `doctor`, `links` and `runtime status` can run while T3 is open.
+Import, sync and replace also support `--dry-run` without closing T3 or passing
+`--yes`. For example:
+
+```sh
+t3-import import --source codex --workspace /path/to/project --all --dry-run
+t3-import sync --source codex --all --dry-run --summary
+t3-import replace --source codex --workspace /path/to/project --thread SESSION_ID --dry-run
+```
+
+Target reads use a single SQLite read-only snapshot. Dry-runs create no backup,
+importer lock, staged attachments or ledger records, and do not reset the cache.
+`--manage-runtime` never pauses the service for a dry-run. SQLite may maintain
+its shared-memory reader bookkeeping or create an empty WAL sidecar; persisted
+conversation and ledger data are unchanged.
+
+Dry-run requires an explicit source and conversation selection. Incomplete
+arguments fail instead of entering the interactive write UI. The TUI continues
+to require a closed or explicitly paused runtime. Active target threads and
+unfinished projections can still prevent a reliable sync/replacement preview;
+being able to read an open database does not waive those checks. Real writes
+recompute their plans and retain the closed-runtime requirement.
 
 ## Optional stop and restart
 

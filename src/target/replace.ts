@@ -17,7 +17,7 @@ import { deterministicUuid, isObject, stringValue } from "../core/util.js";
 import { safetyError, writeError } from "../core/errors.js";
 import type { TargetOverrides } from "./config.js";
 import { listImports, recordConsolidation, type LedgerRecord, type StoredLedgerRecord } from "./ledger.js";
-import { assertT3Closed, isV2Database, validateTargetDatabase } from "./schema.js";
+import { openTargetReadSnapshot, assertT3Closed, isV2Database, validateTargetDatabase } from "./schema.js";
 import { assertV2ThreadSettled, prepareV2Write, v2SourceConflict, v2Thread } from "./v2.js";
 import { threadWorkingDirectory } from "./destination.js";
 import {
@@ -252,9 +252,9 @@ export async function inspectConversationReplacement(conversation: CanonicalConv
 
 export async function replaceConversations(selections: ReplaceSelection[], paths: TargetPaths, options: ReplaceOptions): Promise<ReplaceRunResult> {
   if (!existsSync(paths.dbPath)) throw safetyError(`T3 database not found: ${paths.dbPath}`);
-  await assertT3Closed(paths);
+  if (!options.dryRun) await assertT3Closed(paths);
   const releaseLock = options.dryRun ? () => {} : acquireLock(paths);
-  const db = new Database(paths.dbPath, { readonly: options.dryRun, fileMustExist: true });
+  const db = options.dryRun ? openTargetReadSnapshot(paths) : new Database(paths.dbPath, { fileMustExist: true });
   let backup: string | null = null;
   let v2Committed = false;
   const warnings: string[] = [];

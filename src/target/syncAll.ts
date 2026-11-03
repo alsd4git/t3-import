@@ -1,11 +1,10 @@
-import Database from "better-sqlite3";
 import type { SourceAdapter, SourceName, SyncItemResult, SyncRunResult, TargetPaths } from "../core/types.js";
 import { sourceDriver } from "../core/providers.js";
 import { isObject, stringValue } from "../core/util.js";
 import { safetyError, usageError } from "../core/errors.js";
 import { listImports } from "./ledger.js";
 import { createEvent, currentTitle, readEvents, syncConversations, targetId, validRecord, type SyncOptions } from "./sync.js";
-import { isV2Database, validateTargetDatabase } from "./schema.js";
+import { openTargetReadSnapshot, isV2Database, validateTargetDatabase } from "./schema.js";
 import { isV2ProviderSubagent, v2ProviderThreads, v2Thread } from "./v2.js";
 
 interface LinkedThread {
@@ -16,7 +15,7 @@ interface LinkedThread {
 
 /** Discover by persisted provider identity, across projects and scratch cwd's. */
 function linkedProviderThreads(paths: TargetPaths, source: SourceName): LinkedThread[] {
-  const db = new Database(paths.dbPath, { readonly: true, fileMustExist: true });
+  const db = openTargetReadSnapshot(paths);
   try {
     validateTargetDatabase(db);
     const linked = new Map<string, LinkedThread>();

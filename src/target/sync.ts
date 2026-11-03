@@ -17,7 +17,7 @@ import { checkpointForThread, legacyTurnSemanticHash, parseCheckpoint, turnSeman
 import { canonicalPath, deterministicUuid, isObject, sha256, stringValue } from "../core/util.js";
 import { safetyError, writeError } from "../core/errors.js";
 import type { ProviderSelection, TargetOverrides } from "./config.js";
-import { assertT3Closed, isV2Database, targetMigration, validateTargetDatabase } from "./schema.js";
+import { openTargetReadSnapshot, assertT3Closed, isV2Database, targetMigration, validateTargetDatabase } from "./schema.js";
 import { assertV2ThreadSettled, prepareV2Write, v2ProviderThreads, v2SourceConflict, v2Thread } from "./v2.js";
 import { threadWorkingDirectory } from "./destination.js";
 import { listImports, recordImports, type LedgerRecord, type StoredLedgerRecord } from "./ledger.js";
@@ -733,7 +733,7 @@ function aggregate(results: SyncItemResult[], dryRun: boolean): SyncRunResult["s
 }
 
 export async function inspectConversationSync(conversation: CanonicalConversation, paths: TargetPaths): Promise<ConversationSyncPreview> {
-  const db = new Database(paths.dbPath, { readonly: true, fileMustExist: true });
+  const db = openTargetReadSnapshot(paths);
   try {
     validateTargetDatabase(db);
     const plan = buildPlan(db, paths, conversation, false);
@@ -760,9 +760,9 @@ export async function inspectConversationSync(conversation: CanonicalConversatio
 }
 
 export async function syncConversations(selections: SyncSelection[], paths: TargetPaths, options: SyncOptions): Promise<SyncRunResult> {
-  await assertT3Closed(paths);
+  if (!options.dryRun) await assertT3Closed(paths);
   const releaseLock = options.dryRun ? () => {} : acquireLock(paths);
-  const db = new Database(paths.dbPath, { readonly: options.dryRun, fileMustExist: true });
+  const db = options.dryRun ? openTargetReadSnapshot(paths) : new Database(paths.dbPath, { fileMustExist: true });
   let backup: string | null = null;
   let v2Committed = false;
   const warnings: string[] = [];

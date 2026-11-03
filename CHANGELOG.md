@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Allow import, sync and replace dry-runs while T3 is running, using read-only
+  SQLite snapshots. Real writes still require T3 to be closed or explicitly paused.
+- Remove confirmation requirements for dry-runs and reject incomplete selections
+  instead of silently opening the interactive write UI.
+
 ## 0.1.6-alsd.1
 
 - Support T3 0.1.6 migration 76 with the pinned official persistence runtime,

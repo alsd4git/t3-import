@@ -2,7 +2,6 @@
 import { Command, Option } from "commander";
 import { render } from "ink";
 import React from "react";
-import Database from "better-sqlite3";
 import { createInterface } from "node:readline/promises";
 import { existsSync, readdirSync } from "node:fs";
 import { stdin as input, stdout as output } from "node:process";
@@ -16,7 +15,7 @@ import { inspectLinkedThreads } from "./target/reconciliation.js";
 import { disposeSourceAdapters, sourceAdapter } from "./sources/index.js";
 import { resolveTargetPaths, type TargetOverrides } from "./target/config.js";
 import { IMPORTER_VERSION, importConversations } from "./target/importer.js";
-import { validateTargetDatabase } from "./target/schema.js";
+import { openTargetReadSnapshot, validateTargetDatabase } from "./target/schema.js";
 import { inspectConversationSync, syncConversations } from "./target/sync.js";
 import { syncAllLinkedConversations } from "./target/syncAll.js";
 import { replaceConversations } from "./target/replace.js";
@@ -210,7 +209,7 @@ program.command("doctor")
     const runtime = await inspectRuntimeStatus(paths);
     let database: Record<string, unknown> = { exists: existsSync(paths.dbPath) };
     if (existsSync(paths.dbPath)) {
-      const db = new Database(paths.dbPath, { readonly: true, fileMustExist: true });
+      const db = openTargetReadSnapshot(paths);
       try { database = { exists: true, ...validateTargetDatabase(db) }; }
       catch (error) { database = { exists: true, compatible: false, error: error instanceof Error ? error.message : String(error) }; }
       finally { db.close(); }
@@ -257,6 +256,7 @@ program.command("import")
     validateDestinationOptions(options);
     if ((options.targetProject || options.noProject) && (!options.source || !options.workspace || (!options.all && !options.thread.length))) throw usageError("Destination selection requires --source, --workspace, and --thread or --all; it is not available through the TUI yet.");
     if (!options.source || !options.workspace || (!options.all && options.thread.length === 0)) {
+      if (options.dryRun) throw usageError("Dry-run import requires --source, --workspace, and either --thread or --all.");
       if (process.stdout.isTTY && !options.nonInteractive && !isJson()) {
         const paths = resolveTargetPaths(globalOverrides());
         const source = options.source ? sourceName(options.source) : undefined;
@@ -304,6 +304,7 @@ program.command("replace")
   .option("--non-interactive")
   .action(async (options: { source?: string; workspace?: string; thread: string[]; dryRun?: boolean; yes?: boolean; nonInteractive?: boolean }) => {
     if (!options.source || !options.workspace || options.thread.length === 0) {
+      if (options.dryRun) throw usageError("Dry-run replacement requires --source, --workspace, and --thread.");
       if (process.stdout.isTTY && !options.nonInteractive && !isJson()) {
         const paths = resolveTargetPaths(globalOverrides());
         const source = options.source ? sourceName(options.source) : undefined;
@@ -317,7 +318,7 @@ program.command("replace")
       }
       throw usageError("Non-interactive replacement requires --source, --workspace, and --thread.");
     }
-    if (!options.yes && (!process.stdout.isTTY || options.nonInteractive || isJson())) throw usageError("Non-interactive replacement requires --yes.");
+    if (!options.dryRun && !options.yes && (!process.stdout.isTTY || options.nonInteractive || isJson())) throw usageError("Non-interactive replacement requires --yes.");
     if (!options.dryRun && !options.yes && !await confirmReplace(options.thread.length)) return;
     const source = sourceName(options.source);
     const adapter = sourceAdapter(source);
@@ -349,6 +350,7 @@ program.command("sync")
   .option("--summary", "print a compact synchronization report")
   .action(async (options: { source?: string; workspace?: string; thread: string[]; all?: boolean; since?: string; dryRun?: boolean; yes?: boolean; nonInteractive?: boolean; summary?: boolean }) => {
     if (!options.source || (!options.workspace && !options.all) || (!options.all && options.thread.length === 0)) {
+      if (options.dryRun) throw usageError("Dry-run sync requires --source and either --all or --workspace with --thread.");
       if (process.stdout.isTTY && !options.nonInteractive && !isJson()) {
         const paths = resolveTargetPaths(globalOverrides());
         const source = options.source ? sourceName(options.source) : undefined;
@@ -365,7 +367,7 @@ program.command("sync")
       throw usageError("Non-interactive sync requires --source and either --all or --workspace with --thread.");
     }
     if (options.all && options.thread.length) throw usageError("--all and --thread are mutually exclusive.");
-    if (!options.yes && (!process.stdout.isTTY || options.nonInteractive || isJson())) {
+    if (!options.dryRun && !options.yes && (!process.stdout.isTTY || options.nonInteractive || isJson())) {
       throw usageError("Non-interactive synchronization requires --yes.");
     }
     if (!options.dryRun && !options.yes) {
