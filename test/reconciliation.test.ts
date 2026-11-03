@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { inspectLinkedThreads } from "../src/target/reconciliation.js";
+import { prepareTitlePlan } from "../src/target/titlePlan.js";
 import { importConversations } from "../src/target/importer.js";
 import { canonicalConversation, createTarget } from "./helpers.js";
 
@@ -30,6 +31,35 @@ async function fixture(migration: number) {
 }
 
 describe("linked thread evidence report", () => {
+  it("prepares a native title operation with live preconditions without writing metadata", async () => {
+    const { paths, workspace } = await fixture(76);
+    const conversation = canonicalConversation(workspace);
+    const result = await importConversations([{ conversation, resume: true }], paths, { dryRun: false, resume: true });
+    const threadId = result.results[0]!.threadId;
+    writeFileSync(paths.runtimeStatePath, JSON.stringify({ pid: process.pid }));
+    const before = await inspectLinkedThreads(paths);
+    const plan = await prepareTitlePlan(paths, threadId, "  Approved title  ");
+    expect(plan).toMatchObject({
+      status: "planned", provisional: true, proposedTitle: "Approved title",
+      expected: { threadId, title: conversation.threads[0]!.title, effectiveCwd: workspace },
+      call: { tool: "t3_thread_update", arguments: { action: "rename", threadId, title: "Approved title", clientRequestId: expect.any(String) } },
+    });
+    expect((await inspectLinkedThreads(paths)).threads).toEqual(before.threads);
+    expect(await prepareTitlePlan(paths, threadId, conversation.threads[0]!.title)).toMatchObject({ status: "unchanged", call: null });
+    await expect(prepareTitlePlan(paths, threadId, " ")).rejects.toMatchObject({ exitCode: 2 });
+    await expect(prepareTitlePlan(paths, "unknown", "title")).rejects.toMatchObject({ exitCode: 2 });
+    const db = new Database(paths.dbPath);
+    try { db.prepare("UPDATE orchestration_v2_projection_threads SET archived_at='2026-01-02'").run(); }
+    finally { db.close(); }
+    await expect(prepareTitlePlan(paths, threadId, "title")).rejects.toMatchObject({ exitCode: 2 });
+    expect(await prepareTitlePlan(paths, threadId, "title", { includeArchived: true })).toMatchObject({ expected: { archived: true } });
+  });
+
+  it("does not prepare native renames for a V1 database", async () => {
+    const { paths } = await fixture(40);
+    await expect(prepareTitlePlan(paths, "thread", "title")).rejects.toMatchObject({ exitCode: 3 });
+  });
+
   it.each([62, 67])("keeps V1 identity historical until a verified V2 handoff exists, migration %i", async (migration) => {
     const { paths, workspace } = await fixture(migration);
     const conversation = canonicalConversation(workspace);

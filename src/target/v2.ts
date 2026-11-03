@@ -32,9 +32,9 @@ export function v2Thread(db: Database.Database, threadId: string): Json | undefi
   return row ? JSON.parse(row.payload) as Json : undefined;
 }
 
-export function assertV2ThreadSettled(db: Database.Database, threadId: string): void {
+export function v2ThreadWorkWarning(db: Database.Database, threadId: string): string | undefined {
   const pendingImport = db.prepare("SELECT 1 FROM orchestration_v2_legacy_imports WHERE thread_id=? AND transcript_imported_at IS NULL").get(threadId);
-  if (pendingImport) throw safetyError("T3 has not finished migrating this thread's V1 transcript. Open the thread in T3 and let migration finish before synchronizing.");
+  if (pendingImport) return "T3 has not finished migrating this thread's V1 transcript. Open the thread in T3 and let migration finish before synchronizing.";
   const activeRun = db.prepare("SELECT 1 FROM orchestration_v2_projection_runs WHERE thread_id=? AND status NOT IN ('completed','failed','cancelled','interrupted','rolled_back') LIMIT 1").get(threadId);
   const activeSession = db.prepare(`SELECT 1 FROM orchestration_v2_projection_provider_sessions s
     JOIN orchestration_v2_projection_provider_session_bindings b USING(provider_session_id)
@@ -44,7 +44,13 @@ export function assertV2ThreadSettled(db: Database.Database, threadId: string): 
   const waitingLink = db.prepare("SELECT 1 FROM orchestration_v2_projection_turn_items WHERE thread_id=? AND type='link_request' AND status='waiting' LIMIT 1").get(threadId);
   const openRemoteTask = openRemoteDelegatedTasks(db, threadId).length > 0;
   const pendingDelivery = pendingSubagentDeliveries(db, threadId).length > 0;
-  if (activeRun || activeSession || pendingEffect || nativeBackgroundWork || waitingLink || openRemoteTask || pendingDelivery) throw safetyError("T3 V2 has unfinished work for this thread. Settle or stop it in T3 before synchronizing or replacing its history.");
+  if (activeRun || activeSession || pendingEffect || nativeBackgroundWork || waitingLink || openRemoteTask || pendingDelivery) return "T3 V2 has unfinished work for this thread. Settle or stop it in T3 before synchronizing or replacing its history.";
+  return undefined;
+}
+
+export function assertV2ThreadSettled(db: Database.Database, threadId: string): void {
+  const warning = v2ThreadWorkWarning(db, threadId);
+  if (warning) throw safetyError(warning);
 }
 
 export function v2ProviderThreads(db: Database.Database, threadId?: string): Json[] {

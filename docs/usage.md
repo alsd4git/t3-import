@@ -56,7 +56,7 @@ t3-import doctor --json
 
 ### Synchronize all linked Codex conversations
 
-Close T3 Code, then run `t3-import sync --source codex --all --yes --summary` without `--workspace`. This checks existing provider bindings and import checkpoints across all projects, including scratch workspaces. It does not import unrelated Codex rollouts. Add `--dry-run` to preview without changing the target or import ledger.
+Run `t3-import sync --source codex --all --dry-run --summary` without `--workspace` to preview with T3 open. This checks existing provider bindings and import checkpoints across all projects, including scratch workspaces. It does not import unrelated Codex rollouts. Busy targets are reported as `target-busy`, without claiming transcript equality. Close or explicitly pause T3 before applying with `t3-import sync --source codex --all --yes --summary`.
 
 Only settled additions after a verified matching history are appended. Streaming message deltas and steered user inputs are reconstructed using the recorded provider turn identity. Existing T3 titles are preserved. Divergent histories, ambiguous bindings, and missing source files are skipped; safe updates in the same batch can still succeed. Exit code 7 reports these skipped cases. Separate branches are not automatically merged or replaced.
 
@@ -161,7 +161,7 @@ and Ubuntu. See [package validation](package-validation.md).
 - Supported local image attachments are copied atomically. Remote images are referenced but not downloaded.
 - An external ledger is stored in the platform application-data directory. Event IDs provide the fallback idempotency check if the ledger is missing.
 
-`doctor` reports database compatibility and integrity, live/stale runtime state, discovered IndexedDB caches, source availability, and attachment staging leftovers without changing anything. `t3-import cache reset` can perform the same recoverable cache reset without importing, synchronizing, or replacing anything. Both operations require T3 to be closed.
+`doctor` reports database compatibility and integrity, live/stale runtime state, discovered IndexedDB caches, source availability, and attachment staging leftovers without changing anything and works with T3 open. `t3-import cache reset` can perform the same recoverable cache reset without importing, synchronizing, or replacing anything; cache reset still requires T3 to be closed or explicitly paused.
 
 ## Source behavior
 

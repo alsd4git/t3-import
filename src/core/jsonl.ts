@@ -16,9 +16,10 @@ export async function* readJsonlLines(path: string): AsyncGenerator<string> {
   const file = createReadStream(path);
   const decompressor = path.endsWith(".jsonl.zst") ? createZstdDecompress() : undefined;
   const stream = decompressor ?? file;
+  const cancellation = new AbortController();
   // Attach the rejection handler before consuming output. Both input failures
   // and decoder finalization errors must reject reads, including truncated frames.
-  const completion = decompressor ? pipeline(file, decompressor).then(() => undefined, (error: unknown) => error) : Promise.resolve(undefined);
+  const completion = decompressor ? pipeline(file, decompressor, { signal: cancellation.signal }).then(() => undefined, (error: unknown) => error) : Promise.resolve(undefined);
   const decoder = new StringDecoder("utf8");
   let pending = "";
   try {
@@ -37,6 +38,9 @@ export async function* readJsonlLines(path: string): AsyncGenerator<string> {
     pending += decoder.end();
     if (pending) yield pending.replace(/\r$/u, "");
   } finally {
+    // Header discovery returns before draining the decoder. Cancel the pipeline
+    // explicitly: destroy alone can leave its completion pending under backpressure.
+    cancellation.abort();
     stream.destroy();
     file.destroy();
     await completion;

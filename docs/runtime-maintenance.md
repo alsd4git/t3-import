@@ -16,7 +16,7 @@ active work. Unsupported schemas and malformed activity data are `unknown`.
 
 ## Read-only commands with T3 running
 
-`list`, `show`, `doctor`, `links` and `runtime status` can run while T3 is open.
+`list`, `show`, `doctor`, `links`, `rename-plan` and `runtime status` can run while T3 is open.
 Import, sync and replace also support `--dry-run` without closing T3 or passing
 `--yes`. For example:
 
@@ -34,8 +34,11 @@ conversation and ledger data are unchanged.
 
 Dry-run requires an explicit source and conversation selection. Incomplete
 arguments fail instead of entering the interactive write UI. The TUI continues
-to require a closed or explicitly paused runtime. Active target threads and
-unfinished projections can still prevent a reliable sync/replacement preview;
+to require a closed or explicitly paused runtime. Sync previews mark targets
+with unfinished work as `target-busy`, skip their transcript comparison, and
+continue checking other selections. Zero additions on those rows do not mean
+their transcripts are current. Replacement previews and unfinished projections
+can still prevent a reliable preview;
 being able to read an open database does not waive those checks. Real writes
 recompute their plans and retain the closed-runtime requirement.
 

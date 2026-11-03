@@ -1,6 +1,8 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { zstdCompressSync } from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
 import { readJsonlLines, readStableJsonl } from "../src/core/jsonl.js";
@@ -45,5 +47,21 @@ describe("compressed JSONL", () => {
       expect(JSON.parse(line)).toEqual({ header: true });
       break;
     }
+  });
+
+  it("settles early cancellation in a standalone process with compressed input backpressure", () => {
+    const path = join(directory(), "session.jsonl.zst");
+    const noise = Array.from({ length: 4096 }, (_, index) => createHash("sha256").update(String(index)).digest("hex")).join("");
+    writeFileSync(path, zstdCompressSync(Buffer.from('{"header":true}\n' + noise + "x".repeat(300_000))));
+    const moduleUrl = new URL("../src/core/jsonl.ts", import.meta.url).href;
+    const script = `import {readJsonlLines} from ${JSON.stringify(moduleUrl)};
+      for await (const line of readJsonlLines(process.argv[1])) { break; }
+      console.log("closed");`;
+    const result = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script, path], {
+      encoding: "utf8", timeout: 10_000,
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout.trim()).toBe("closed");
+    expect(result.stderr).not.toContain("unsettled");
   });
 });

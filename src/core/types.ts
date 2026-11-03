@@ -153,6 +153,7 @@ export type SyncItemStatus =
   | "history-diverged"
   | "branch-sync-unsupported"
   | "target-missing"
+  | "target-busy"
   | "not-imported"
   | "dry-run";
 
@@ -259,7 +260,7 @@ export interface SyncSelection {
 
 export interface ConversationSyncPreview {
   sourceId: string;
-  status: "new" | "active-only" | "syncable" | "up-to-date" | "history-diverged" | "branch-sync-unsupported" | "target-missing";
+  status: "new" | "active-only" | "syncable" | "up-to-date" | "history-diverged" | "branch-sync-unsupported" | "target-missing" | "target-busy";
   newTurns: number;
   newCompletedTurns: number;
   newInterruptedTurns: number;

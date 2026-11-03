@@ -170,6 +170,7 @@ export function conversationStatusText(preview: ConversationSyncPreview | undefi
   if (!preview) return checking ? "checking…" : "unavailable";
   if (preview.status === "new") return "new";
   if (preview.status === "active-only") return "active turn only";
+  if (preview.status === "target-busy") return "T3 thread busy";
   if (preview.status === "syncable") {
     const added = `${preview.newTurns} new turn${preview.newTurns === 1 ? "" : "s"}`;
     const statuses: string[] = [];
@@ -214,6 +215,7 @@ export function ConversationStatusDetails({ preview, replacement, checking, erro
   else if (preview.status === "syncable") action = "Select to append the settled missing turns. Existing messages and local titles are preserved.";
   else if (preview.status === "up-to-date") action = "No settled messages need importing.";
   else if (preview.status === "active-only") action = "Wait for the source turn to finish, then reopen this workspace to check again.";
+  else if (preview.status === "target-busy") action = "Wait for T3 to finish this thread's pending work, then check again.";
   else if (preview.status === "history-diverged") action = replacement?.selectable && mode === "auto"
     ? "Conflict: select to review replacement. Histories will not be merged automatically."
     : "Conflict: inspect the differing histories before choosing replacement.";

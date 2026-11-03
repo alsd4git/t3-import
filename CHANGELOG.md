@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Fix an unsettled-await exit when Codex discovery closes a compressed rollout
+  early under stream backpressure.
+- Report busy sync targets individually during read-only previews, preserving
+  the unfinished-work refusal for real writes.
+- Add read-only `rename-plan` to prepare native MCP title calls with the current
+  thread identity and title. Application remains through T3's supported MCP tool.
 - Allow import, sync and replace dry-runs while T3 is running, using read-only
   SQLite snapshots. Real writes still require T3 to be closed or explicitly paused.
 - Remove confirmation requirements for dry-runs and reject incomplete selections

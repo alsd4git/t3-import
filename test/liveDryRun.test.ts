@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, wr
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { spawnSync } from "node:child_process";
+import { zstdCompressSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { canonicalConversation, createTarget } from "./helpers.js";
 import { importConversations } from "../src/target/importer.js";
@@ -130,6 +131,63 @@ it.each(["import", "sync", "replace"])("rejects incomplete %s dry-run instead of
   const result = cli(join(root, "t3"), command, "--dry-run");
   expect(result.status).toBe(2);
   expect(JSON.parse(result.stdout).error).toContain("Dry-run");
+});
+
+it("sync-all dry-run loads compressed sources with T3 open and leaves all data unchanged", () => {
+  const home = join(root, "t3");
+  const paths = createTarget(home, 76);
+  const sessions = join(root, "codex", "sessions"); mkdirSync(sessions, { recursive: true });
+  const source = join(sessions, "fixture.jsonl.zst");
+  writeFileSync(source, zstdCompressSync(Buffer.from(rollout(1))));
+  const imported = cli(home, "import", "--source", "codex", "--workspace", root, "--all", "--yes", "--non-interactive");
+  expect(imported.status, imported.stderr || imported.stdout).toBe(0);
+  writeFileSync(source, zstdCompressSync(Buffer.from(rollout(2))));
+  writeFileSync(paths.runtimeStatePath, JSON.stringify({ pid: process.pid }));
+  const before = snapshot(root);
+  const result = cli(home, "--manage-runtime", "sync", "--source", "codex", "--all", "--dry-run");
+  expect(result.status, result.stderr || result.stdout).toBe(0);
+  expect(JSON.parse(result.stdout)).toMatchObject({ status: "dry-run", hasConflicts: false, backup: null, results: [{ turnsAdded: 1 }] });
+  expect(result.stderr).not.toContain("unsettled");
+  expect(snapshot(root)).toEqual(before);
+});
+
+it("CLI rename-plan prepares a native call while T3 is open without applying the title", () => {
+  const home = join(root, "t3");
+  const paths = createTarget(home, 76);
+  const sessions = join(root, "codex", "sessions"); mkdirSync(sessions, { recursive: true });
+  writeFileSync(join(sessions, "fixture.jsonl"), rollout(1));
+  const imported = cli(home, "import", "--source", "codex", "--workspace", root, "--all", "--yes", "--non-interactive");
+  expect(imported.status, imported.stderr || imported.stdout).toBe(0);
+  const threadId = JSON.parse(imported.stdout).results[0].threadId as string;
+  writeFileSync(paths.runtimeStatePath, JSON.stringify({ pid: process.pid }));
+  const before = snapshot(root);
+  const result = cli(home, "rename-plan", "--thread", threadId, "--title", "Native title");
+  expect(result.status, result.stderr || result.stdout).toBe(0);
+  expect(JSON.parse(result.stdout)).toMatchObject({ status: "planned", provisional: true, expected: { threadId }, call: { tool: "t3_thread_update", arguments: { threadId, title: "Native title" } } });
+  expect(snapshot(root)).toEqual(before);
+});
+
+it("reports busy targets individually in a dry-run and still refuses their real sync", async () => {
+  const paths = createTarget(join(root, "t3"), 76);
+  const busy = canonicalConversation(root);
+  const idle = structuredClone(busy);
+  idle.threads[0]!.sourceKey = "codex:idle-session";
+  idle.threads[0]!.sourceSessionId = "idle-session";
+  idle.threads[0]!.resumeCursor = { threadId: "idle-session" };
+  idle.summary.id = "idle-session";
+  const imported = await importConversations([{ conversation: busy, resume: true }, { conversation: idle, resume: true }], paths, { dryRun: false, resume: true });
+  const writer = new Database(paths.dbPath);
+  try {
+    writer.prepare("INSERT INTO orchestration_v2_projection_runs (run_id,thread_id,ordinal,provider,status,requested_at,payload_json) VALUES ('busy-run',?,1,'codex','running','2026-01-01','{}')").run(imported.results[0]!.threadId);
+  } finally { writer.close(); }
+  busy.threads[0]!.title = "Busy new title";
+  idle.threads[0]!.title = "Idle new title";
+  const before = snapshot(root);
+  const result = await syncConversations([{ conversation: busy }, { conversation: idle }], paths, { dryRun: true });
+  expect(result).toMatchObject({ status: "dry-run", hasConflicts: true, backup: null, results: [{ status: "target-busy", turnsAdded: 0, events: 0 }, { status: "dry-run", titleAction: "updated" }] });
+  expect(await inspectConversationSync(busy, paths)).toMatchObject({ status: "target-busy", selectable: false });
+  await expect(syncConversations([{ conversation: busy }], paths, { dryRun: false })).rejects.toMatchObject({ exitCode: 4, message: expect.stringContaining("unfinished work") });
+  expect(snapshot(root)).toEqual(before);
 });
 
 it("allows list/show/doctor/links/runtime status with T3 open without modifying data", () => {

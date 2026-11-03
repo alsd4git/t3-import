@@ -18,7 +18,7 @@ import { canonicalPath, deterministicUuid, isObject, sha256, stringValue } from 
 import { safetyError, writeError } from "../core/errors.js";
 import type { ProviderSelection, TargetOverrides } from "./config.js";
 import { openTargetReadSnapshot, assertT3Closed, isV2Database, targetMigration, validateTargetDatabase } from "./schema.js";
-import { assertV2ThreadSettled, prepareV2Write, v2ProviderThreads, v2SourceConflict, v2Thread } from "./v2.js";
+import { assertV2ThreadSettled, prepareV2Write, v2ProviderThreads, v2SourceConflict, v2Thread, v2ThreadWorkWarning } from "./v2.js";
 import { threadWorkingDirectory } from "./destination.js";
 import { listImports, recordImports, type LedgerRecord, type StoredLedgerRecord } from "./ledger.js";
 import {
@@ -623,7 +623,10 @@ function buildPlan(db: Database.Database, paths: TargetPaths, conversation: Cano
   }
   const record = match.record;
   if (isV2Database(db)) {
-    assertV2ThreadSettled(db, record.threadId);
+    if (dryRun) {
+      const warning = v2ThreadWorkWarning(db, record.threadId);
+      if (warning) return { conversation, thread, record, result: conflictResult(thread, "target-busy", warning, record), titleEvent: false, previouslyImported: true };
+    } else assertV2ThreadSettled(db, record.threadId);
     const current = v2Thread(db, record.threadId);
     if (current?.deletedAt) return { conversation, thread, record, result: conflictResult(thread, "target-missing", "The V2 thread is deleted.", record), titleEvent: false, previouslyImported: true };
     const conflict = v2SourceConflict(db, record.threadId, thread);
@@ -691,7 +694,7 @@ function buildPlan(db: Database.Database, paths: TargetPaths, conversation: Cano
 }
 
 function hasConflict(status: SyncItemResult["status"]): boolean {
-  return ["history-diverged", "branch-sync-unsupported", "target-missing", "not-imported"].includes(status);
+  return ["history-diverged", "branch-sync-unsupported", "target-missing", "target-busy", "not-imported"].includes(status);
 }
 
 /**
@@ -736,7 +739,7 @@ export async function inspectConversationSync(conversation: CanonicalConversatio
   const db = openTargetReadSnapshot(paths);
   try {
     validateTargetDatabase(db);
-    const plan = buildPlan(db, paths, conversation, false);
+    const plan = buildPlan(db, paths, conversation, true);
     const result = plan.result;
     const activeOnly = plan.thread.turns.length === 0 && (plan.thread.ignoredInProgressTurns ?? 0) > 0;
     const status: ConversationSyncPreview["status"] = activeOnly

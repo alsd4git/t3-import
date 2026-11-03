@@ -78,7 +78,8 @@ verified idle systemd service and restore it on exit. Scripts can opt in with
 
 ## Import and sync
 
-Close T3 before importing, syncing, or replacing history. Every write creates a
+Close T3 before writing imported, synced, or replacement history. Read-only
+commands and explicit `--dry-run` selections work with T3 open. Every write creates a
 verified database backup. Keep that backup and back up the external import ledger
 separately when needed. See [storage and recovery](docs/usage.md#safety-and-storage).
 
@@ -93,7 +94,7 @@ Native "No project" is available only for eligible T3 scratch folders.
 t3-import                               # interactive import and sync
 t3-import import --source opencode      # start with OpenCode
 t3-import sync --source codex            # focused interactive sync
-t3-import sync --source codex --all --dry-run --yes --summary
+t3-import sync --source codex --all --dry-run --summary
 t3-import sync --source codex --all --yes --summary
 t3-import links --json                  # read-only identity report
 ```
@@ -101,6 +102,11 @@ t3-import links --json                  # read-only identity report
 `links` distinguishes current bindings, retained V1 identities and verified V2
 context handoffs. It does not compare transcripts, rename threads, or establish
 identity from similar titles. It can run while T3 is open, with provisional results.
+
+For a title change with T3 open, `rename-plan --thread T3_THREAD_ID --title
+"New title" --json` prepares the native `t3_thread_update` MCP call and its
+expected identity/title. It does not apply the rename. See
+[native title updates](docs/native-titles.md) for the agent/skill workflow.
 
 The TUI explains pending additions, active turns, conflicts and unavailable
 sources. Safe sync appends settled history only after verifying the existing

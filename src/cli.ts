@@ -12,6 +12,7 @@ import { validateDestinationOptions } from "./target/destination.js";
 import type { ImportRunResult, ReplaceRunResult, SourceName, SourceSummary, SyncRunResult } from "./core/types.js";
 import { sourceNames } from "./core/providers.js";
 import { inspectLinkedThreads } from "./target/reconciliation.js";
+import { prepareTitlePlan } from "./target/titlePlan.js";
 import { disposeSourceAdapters, sourceAdapter } from "./sources/index.js";
 import { resolveTargetPaths, type TargetOverrides } from "./target/config.js";
 import { IMPORTER_VERSION, importConversations } from "./target/importer.js";
@@ -170,6 +171,18 @@ program.command("links")
   .action(async (options: { source?: string; includeSubagents?: boolean; includeArchived?: boolean }) => {
     print(await inspectLinkedThreads(resolveTargetPaths(globalOverrides()), {
       ...(options.source ? { source: sourceName(options.source) } : {}),
+      includeSubagents: Boolean(options.includeSubagents), includeArchived: Boolean(options.includeArchived),
+    }));
+  });
+
+program.command("rename-plan")
+  .description("Preview a T3 title change and prepare its native MCP call; never apply it")
+  .requiredOption("--thread <id>", "exact T3 thread ID, not the provider session ID")
+  .requiredOption("--title <title>", "proposed T3 title")
+  .option("--include-subagents", "allow an explicitly selected child thread")
+  .option("--include-archived", "allow an explicitly selected archived thread")
+  .action(async (options: { thread: string; title: string; includeSubagents?: boolean; includeArchived?: boolean }) => {
+    print(await prepareTitlePlan(resolveTargetPaths(globalOverrides()), options.thread, options.title, {
       includeSubagents: Boolean(options.includeSubagents), includeArchived: Boolean(options.includeArchived),
     }));
   });

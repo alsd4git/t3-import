@@ -287,12 +287,13 @@ it("refuses pending legacy hydration and queued V2 runs", async () => {
   const db = new Database(paths.dbPath);
   db.prepare("INSERT INTO orchestration_v2_legacy_imports (thread_id,source_updated_at,shell_imported_at) VALUES (?,?,?)").run(threadId, conversation.threads[0]!.updatedAt, conversation.threads[0]!.updatedAt);
   db.close();
-  await expect(inspectConversationSync(conversation, paths)).rejects.toMatchObject({ exitCode: 4, message: expect.stringContaining("migrating") });
+  expect(await inspectConversationSync(conversation, paths)).toMatchObject({ status: "target-busy", selectable: false, warnings: [expect.stringContaining("migrating")] });
+  await expect(syncConversations([{ conversation }], paths, { dryRun: false })).rejects.toMatchObject({ exitCode: 4, message: expect.stringContaining("migrating") });
   const hydrated = new Database(paths.dbPath);
   hydrated.prepare("UPDATE orchestration_v2_legacy_imports SET transcript_imported_at=shell_imported_at").run();
   hydrated.prepare("INSERT INTO orchestration_v2_effect_outbox (effect_id,command_id,thread_id,effect_type,payload_json,status,attempt_count,available_at,created_at,updated_at) VALUES ('pending-effect','command',?,'provider-turn.start','{}','pending',0,?,?,?)").run(threadId, conversation.threads[0]!.updatedAt, conversation.threads[0]!.updatedAt, conversation.threads[0]!.updatedAt);
   hydrated.close();
-  await expect(inspectConversationSync(conversation, paths)).rejects.toMatchObject({ exitCode: 4, message: expect.stringContaining("unfinished") });
+  expect(await inspectConversationSync(conversation, paths)).toMatchObject({ status: "target-busy", selectable: false, warnings: [expect.stringContaining("unfinished")] });
   const settledEffect = new Database(paths.dbPath);
   settledEffect.prepare("UPDATE orchestration_v2_effect_outbox SET status='cancelled'").run();
   settledEffect.close();
@@ -302,6 +303,7 @@ it("refuses pending legacy hydration and queued V2 runs", async () => {
       providerThreadId: null, userMessageId: "queued-user", rootNodeId: null, activeAttemptId: null, status: "queued",
       requestedAt: conversation.threads[0]!.updatedAt, startedAt: null, completedAt: null, checkpointId: null, contextHandoffId: null } }]);
   const before = eventCount(paths.dbPath);
+  expect((await syncConversations([{ conversation }], paths, { dryRun: true })).results[0]).toMatchObject({ status: "target-busy", events: 0 });
   await expect(syncConversations([{ conversation }], paths, { dryRun: false })).rejects.toMatchObject({ exitCode: 4, message: expect.stringContaining("unfinished") });
   expect(eventCount(paths.dbPath)).toBe(before);
 });
