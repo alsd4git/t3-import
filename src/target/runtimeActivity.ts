@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import type { TargetPaths } from "../core/types.js";
 import { isV2Database, targetMigration } from "./schema.js";
-import { openRemoteDelegatedTasks, pendingSubagentDeliveries } from "./v2Work.js";
+import { openRemoteDelegatedTasks, pendingSubagentDeliveries, pendingDelegatedRunDeliveries } from "./v2Work.js";
 
 export interface RuntimeActivity {
   status: "idle" | "busy" | "unknown";
@@ -119,6 +119,9 @@ function inspectV2(db: Database.Database, counts: Record<string, number>, work: 
   const backgroundTasks = rows(db, `SELECT provider_thread_id, json_extract(task.value,'$.taskId') task_id FROM orchestration_v2_projection_provider_threads, json_each(orchestration_v2_projection_provider_threads.payload_json,'$.pendingBackgroundTasks') task`);
   const pendingBackgroundTasks = backgroundTasks.length;
   const deliveries = pendingSubagentDeliveries(db);
+  const runDeliveries = pendingDelegatedRunDeliveries(db);
+  setCount(counts, "v2_pending_delegated_run_deliveries", runDeliveries.length);
+  for (const delivery of runDeliveries) work.push(`v2-run-delivery:${delivery.threadId}:${delivery.runId}`);
   setCount(counts, "v2_pending_subagent_deliveries", deliveries.length);
   for (const task of deliveries) work.push(`v2-delivery:${task.threadId}:${task.taskId}`);
   const remoteTasks = openRemoteDelegatedTasks(db);

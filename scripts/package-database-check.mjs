@@ -1,7 +1,7 @@
 import { createRequire } from "node:module";
 
-const [packageManifest, filename] = process.argv.slice(2);
-if (!packageManifest || !filename) throw new Error("Expected installed package manifest and synthetic database path.");
+const [packageManifest, filename, expectedMigration] = process.argv.slice(2);
+if (!packageManifest || !filename || !expectedMigration || !Number.isSafeInteger(Number(expectedMigration))) throw new Error("Expected installed package manifest, synthetic database path and migration.");
 const Database = createRequire(packageManifest)("better-sqlite3");
 const database = new Database(filename, { readonly: true, fileMustExist: true });
 try {
@@ -9,7 +9,7 @@ try {
   if (integrity !== "ok") throw new Error(`Synthetic T3 database integrity check returned ${integrity}.`);
   if (database.pragma("foreign_key_check").length) throw new Error("Synthetic T3 database has invalid foreign keys.");
   const migration = database.prepare("SELECT MAX(migration_id) migration FROM effect_sql_migrations").get().migration;
-  if (migration !== 76) throw new Error(`Synthetic T3 database used migration ${migration}; expected 76.`);
+  if (migration !== Number(expectedMigration)) throw new Error(`Synthetic T3 database used migration ${migration}; expected ${expectedMigration}.`);
   const messageCount = database.prepare("SELECT COUNT(*) count FROM orchestration_v2_projection_messages").get().count;
   if (messageCount !== 4) throw new Error(`Packed CLI import/sync produced ${messageCount} messages; expected 4.`);
   const matches = database.prepare("SELECT COUNT(*) count FROM orchestration_v2_message_search WHERE orchestration_v2_message_search MATCH 'Synthetic'").get().count;

@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.1.7-alsd.1
+
+- Support T3 0.1.7 migration 79 with the pinned official persistence runtime and
+  isolated Effect 4.1.2, retaining earlier supported releases.
+- Respect outstanding delegated run-cohort deliveries during activity inspection
+  and per-thread write checks, including terminal origin runs.
+- Validate populated 0.1.6-to-0.1.7 upgrades and one-time schedule activity.
+- Derive packed validation's runtime and migration from the release profile.
 
 - Fix an unsettled-await exit when Codex discovery closes a compressed rollout
   early under stream backpressure.

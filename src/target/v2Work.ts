@@ -25,3 +25,13 @@ export function pendingSubagentDeliveries(db: Database.Database, threadId?: stri
       AND json_extract(payload_json,'$.completionDelivery.state') IN ('pending','claimed')${threadId === undefined ? "" : " AND thread_id=?"}`)
     .all(...(threadId === undefined ? [] : [threadId])) as Array<{ threadId: string; taskId: string }>;
 }
+
+/** Matches T3's delegated-completions recovery candidates. A terminal origin
+ * run can still carry a cohort delivery that the server must finish or recover.
+ */
+export function pendingDelegatedRunDeliveries(db: Database.Database, threadId?: string): Array<{ threadId: string; runId: string }> {
+  return db.prepare(`SELECT thread_id threadId, run_id runId
+    FROM orchestration_v2_projection_runs
+    WHERE json_type(payload_json,'$.delegatedCompletion.delivery')='object'${threadId === undefined ? "" : " AND thread_id=?"}`)
+    .all(...(threadId === undefined ? [] : [threadId])) as Array<{ threadId: string; runId: string }>;
+}

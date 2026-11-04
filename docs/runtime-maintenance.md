@@ -13,6 +13,9 @@ database snapshot. It checks unfinished runs and attempts, provider sessions,
 approvals/input requests, background work, launch workflows, effects and due or
 running scheduled tasks. Future schedules produce a warning and do not count as
 active work. Unsupported schemas and malformed activity data are `unknown`.
+Outstanding delegated run-cohort deliveries also count as busy, even when the
+origin run is terminal. T3 0.1.7 one-time schedules use the same due/running
+checks as recurring tasks; a future schedule remains a warning.
 
 ## Read-only commands with T3 running
 

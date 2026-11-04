@@ -4,9 +4,13 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { zstdCompressSync } from "node:zlib";
+import { releases } from "./v2/releases.mjs";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const metadata = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
+const t3Release = metadata.version.split("-alsd.")[0];
+const profile = releases[t3Release];
+if (!profile) throw new Error(`No pinned T3 runtime for package version ${metadata.version}.`);
 const temporaryRoot = await mkdtemp(join(tmpdir(), "t3-import-package-check-"));
 
 function run(command, args, options = {}) {
@@ -83,7 +87,7 @@ try {
   const ledger = join(temporaryRoot, "ledger");
   await Promise.all([mkdir(stateDirectory, { recursive: true }), mkdir(join(codexHome, "sessions", "2026", "10"), { recursive: true }), mkdir(workspace)]);
 
-  const runtime = await import(pathToFileURL(join(installedPackage, "vendor", "t3-v016", "runtime.mjs")).href);
+  const runtime = await import(pathToFileURL(join(installedPackage, "vendor", profile.directory, "runtime.mjs")).href);
   const loggerMethods = ["debug", "info", "log", "warn", "error"].map((method) => [method, console[method].bind(console)]);
   for (const [method] of loggerMethods) console[method] = () => {};
   try {
@@ -122,9 +126,9 @@ try {
 
   // Windows cannot unlink a loaded native addon, even after its DB is closed.
   // Let the verification process exit and unload the DLL before removing install/.
-  run(process.execPath, [fileURLToPath(new URL("./package-database-check.mjs", import.meta.url)), join(installedPackage, "package.json"), stateDatabase]);
+  run(process.execPath, [fileURLToPath(new URL("./package-database-check.mjs", import.meta.url)), join(installedPackage, "package.json"), stateDatabase, String(profile.migration)]);
 
-  console.log(`Packed artifact ${metadata.name}@${metadata.version}: install, CLI help/version, and T3 0.1.6 import/sync passed.`);
+  console.log(`Packed artifact ${metadata.name}@${metadata.version}: install, CLI help/version, and T3 ${t3Release} import/sync passed.`);
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
 }

@@ -1,8 +1,22 @@
 # T3 compatibility validation
 
-The importer supports V1 database migrations 40–54 and T3 V2 migrations 62, 67, 69, 72 and 76 explicitly. A supported number
+The importer supports V1 database migrations 40–54 and T3 V2 migrations 62, 67, 69, 72, 76 and 79 explicitly. A supported number
 must also pass integrity and required-column checks. This is not a promise that
 every future T3 commit retaining the same migration number will remain compatible.
+
+## T3 0.1.7 / migration 79
+
+The migration 79 writer pins `v0.1.7` to
+`322f6544dfad0a3c8a0c8cbecf2c7f7874b14268` in `vendor/t3-v017`, with
+Effect 4.1.2 isolated from the earlier runtimes. Migration 77 repairs boolean
+thread settlement overrides; 78 removes an unused correlation index; 79 adds
+delegated recovery indexes. T3 owns those migrations; the importer only runs
+them when generating or upgrading isolated test fixtures.
+
+Activity and thread-write guards also recognize a terminal run's outstanding
+delegated completion cohort. One-time schedules follow the existing persisted
+next-run timestamp and running status checks. Intermediate migrations 77–78
+remain unsupported. See the [0.1.7 validation record](v017-validation.md).
 
 ## T3 0.1.6 / migration 76
 

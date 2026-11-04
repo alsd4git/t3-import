@@ -7,7 +7,8 @@ or install anything globally.
 
 The check packs the project, installs the tarball in a temporary directory, and
 runs the installed CLI's help and version commands. It then creates a synthetic
-T3 0.1.6 database with the pinned runtime included in the package, writes a
+T3 database matching the package's base T3 version, using the pinned runtime
+included in the package, writes a
 synthetic compressed Codex rollout under a temporary `CODEX_HOME`, and invokes
 the installed CLI to import one turn. It then adds a matching plain rollout with
 a second turn and checks sync and repeated sync without duplicating history.

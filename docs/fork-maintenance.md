@@ -4,6 +4,15 @@
 [CarlosGtrz/t3-import](https://github.com/CarlosGtrz/t3-import). Keep the upstream
 remote for review and selectively integrate relevant future changes.
 
+Keep fork release tags locally when fetching from both remotes. A global
+`fetch.pruneTags=true` can remove them when fetching upstream, where they do not
+exist. Override it for this clone and restore the fork's tags with:
+
+```sh
+git config --local fetch.pruneTags false
+git fetch origin --tags --no-prune --no-prune-tags
+```
+
 ## Integration history
 
 The first fork release starts at upstream commit `5e20fb5` and consolidates the
@@ -35,7 +44,7 @@ issue and installation links without rewriting historical validation reports.
 
 Update `package.json`, its root entry in `package-lock.json`, the changelog and
 versioned installation instructions together. Push the commit to `main` and
-wait for all six Windows, macOS and Ubuntu Node 22/24 CI jobs to pass. Then push
+wait for all nine Windows, macOS and Ubuntu Node 22/24/26 CI jobs to pass. Then push
 an immutable tag exactly matching the package version, such as
 `v0.1.2-alsd.1`. The tag workflow verifies the tag, package name, lockfile and
 that its commit is on `origin/main` before creating a release artifact.
@@ -68,7 +77,7 @@ secret is used. The publishing job receives `id-token: write`; only the GitHub
 release step receives `GH_TOKEN` from `github.token`.
 
 The publish job runs only for a `v*` tag push in `alsd4git/t3-import`, after all
-six test jobs pass. npm publication is therefore part of the authorized tag
+nine test jobs pass. npm publication is therefore part of the authorized tag
 release workflow. A published npm name/version cannot be reused for different
 contents.
 

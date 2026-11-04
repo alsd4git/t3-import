@@ -7,6 +7,7 @@ import { isObject, stringValue } from "../core/util.js";
 import { v2Profiles, v2Migrations } from "./v2Profiles.js";
 
 export const SUPPORTED_MIGRATIONS = [40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, ...Object.keys(v2Profiles).map(Number)];
+const supportedVersions = ["40–54 (V1)", ...Object.entries(v2Profiles).map(([migration, profile]) => `${migration} (T3 ${profile.release.replaceAll(" / ", "/")} V2)`)].join(", ");
 
 export function isV2Database(db: Database.Database): boolean {
   return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='orchestration_v2_projection_threads'").get());
@@ -16,7 +17,7 @@ export function isV2Database(db: Database.Database): boolean {
 export function targetMigration(db: Database.Database): number {
   const row = db.prepare("SELECT COALESCE(MAX(migration_id), 0) migration FROM effect_sql_migrations").get() as { migration: number };
   if (!SUPPORTED_MIGRATIONS.some((migration) => migration === row.migration)) {
-    throw compatibilityError(`Unsupported T3 schema migration ${row.migration}; supported migrations are 40–54 (V1), 62 (T3 0.1.0 V2), 67 (T3 0.1.1/0.1.2 V2), 69 (T3 0.1.3 V2), 72 (T3 0.1.4/0.1.5 V2), and 76 (T3 0.1.6 V2).`);
+    throw compatibilityError(`Unsupported T3 schema migration ${row.migration}; supported migrations are ${supportedVersions}.`);
   }
   return row.migration;
 }
