@@ -190,22 +190,19 @@ it("reports busy targets individually in a dry-run and still refuses their real 
   expect(snapshot(root)).toEqual(before);
 });
 
-it("allows list/show/doctor/links/runtime status with T3 open without modifying data", () => {
+it.each(["list", "show", "doctor", "links", "runtime"])("allows %s with T3 open without modifying data", (command) => {
   const home = join(root, "t3");
   const paths = createTarget(home, 76);
   const sessions = join(root, "codex", "sessions"); mkdirSync(sessions, { recursive: true });
   writeFileSync(join(sessions, "fixture.jsonl"), rollout(1));
   writeFileSync(paths.runtimeStatePath, JSON.stringify({ pid: process.pid }));
   const before = snapshot(root);
-  for (const args of [
-    ["list", "--source", "codex", "--workspace", root],
-    ["show", "--source", "codex", "--thread", sessionId, "--workspace", root],
-    ["doctor"], ["links"], ["runtime", "status"],
-  ]) {
-    const result = cli(home, ...args);
-    expect(result.status, result.stderr || result.stdout).toBe(0);
-    expect(() => JSON.parse(result.stdout)).not.toThrow();
-  }
+  const args = command === "list" ? [command, "--source", "codex", "--workspace", root]
+    : command === "show" ? [command, "--source", "codex", "--thread", sessionId, "--workspace", root]
+    : command === "runtime" ? [command, "status"] : [command];
+  const result = cli(home, ...args);
+  expect(result.status, result.stderr || result.stdout).toBe(0);
+  expect(() => JSON.parse(result.stdout)).not.toThrow();
   expect(snapshot(root)).toEqual(before);
 });
 

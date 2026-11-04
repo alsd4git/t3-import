@@ -45,7 +45,7 @@ MCP title operations and the offline transcript-write requirement are unchanged.
 
 ## Verification
 
-Validated on macOS on 4 November 2026. All 944 tests in 25 files passed with
+Validated on macOS on 4 November 2026. All 948 tests in 25 files passed with
 Node.js 26.13.0, along with typechecking. The packed install check passed with
 Node.js 22.23.2, 24.19.0 and 26.13.0 using migration 79, including compressed Codex import,
 subsequent sync, idempotency, FTS, integrity, foreign keys and zero queued effects.

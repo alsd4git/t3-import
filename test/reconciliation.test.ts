@@ -31,6 +31,8 @@ async function fixture(migration: number) {
 }
 
 describe("linked thread evidence report", () => {
+  // Includes the first pinned-runtime import plus several SQLite snapshots.
+  // Hosted macOS runners need more than the unit-test budget for this fixture.
   it("prepares a native title operation with live preconditions without writing metadata", async () => {
     const { paths, workspace } = await fixture(76);
     const conversation = canonicalConversation(workspace);
@@ -53,7 +55,7 @@ describe("linked thread evidence report", () => {
     finally { db.close(); }
     await expect(prepareTitlePlan(paths, threadId, "title")).rejects.toMatchObject({ exitCode: 2 });
     expect(await prepareTitlePlan(paths, threadId, "title", { includeArchived: true })).toMatchObject({ expected: { archived: true } });
-  });
+  }, 20_000);
 
   it("does not prepare native renames for a V1 database", async () => {
     const { paths } = await fixture(40);
