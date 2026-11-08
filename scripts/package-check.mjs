@@ -64,15 +64,28 @@ try {
   if (!packed?.filename) throw new Error("npm pack did not report a tarball filename.");
   const tarball = join(packDirectory, packed.filename);
 
-  runNpm(["install", "--ignore-scripts=false", "--no-audit", "--no-fund", "--prefix", installDirectory, tarball]);
+  // Reproduce npm's blocked-native-install case before approving any scripts.
+  runNpm(["install", "--ignore-scripts", "--no-audit", "--no-fund", "--prefix", installDirectory, tarball]);
+  const installedPackage = join(installDirectory, "node_modules", ...metadata.name.split("/"));
+  const cli = join(installedPackage, metadata.bin["t3-import"]);
+  const diagnosticEnvironment = {
+    CODEX_HOME: join(temporaryRoot, "unconfigured-codex"),
+    CLAUDE_CONFIG_DIR: join(temporaryRoot, "unconfigured-claude"),
+    OPENCODE_DB: join(temporaryRoot, "unconfigured-opencode.db"),
+    CODEX_BIN: join(temporaryRoot, "missing-codex.exe"),
+  };
+  const blocked = JSON.parse(run(process.execPath, [cli, "doctor", "--t3-home", join(temporaryRoot, "missing-t3"), "--json"], { env: diagnosticEnvironment }));
+  if (blocked.dependencies?.sqlite?.reason !== "missing-native" || !blocked.dependencies.sqlite.repairCommand) throw new Error("Packed CLI did not diagnose the missing native SQLite addon.");
+  const blockedImport = spawnSync(process.execPath, [cli, "--t3-home", join(temporaryRoot, "missing-t3"), "--manage-runtime", "import", "--source", "codex", "--workspace", temporaryRoot, "--all", "--yes", "--non-interactive", "--json"], {
+    env: { ...process.env, ...diagnosticEnvironment }, encoding: "utf8", timeout: 20_000,
+  });
+  if (blockedImport.status !== 3 || !JSON.parse(blockedImport.stdout).error.includes("better-sqlite3 native module")) throw new Error("Packed CLI did not reject import before runtime maintenance when SQLite was unavailable.");
   const npmVersion = runNpm(["--version"]).trim();
   if (Number.parseInt(npmVersion, 10) >= 11) {
     // npm 11's install-script approval policy blocks native dependency builds by default.
     runNpm(["install-scripts", "approve", "--prefix", installDirectory, "better-sqlite3"]);
   }
   runNpm(["rebuild", "--prefix", installDirectory, "better-sqlite3"]);
-  const installedPackage = join(installDirectory, "node_modules", ...metadata.name.split("/"));
-  const cli = join(installedPackage, metadata.bin["t3-import"]);
   const help = run(process.execPath, [cli, "--help"]);
   const version = run(process.execPath, [cli, "--version"]);
   assertIncludes(help, "Import selected conversations", "Installed CLI help");

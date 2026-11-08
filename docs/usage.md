@@ -134,7 +134,7 @@ history, active-only sessions, conflicts and unavailable sources. Focus a row to
 see its next action and the specific reconciliation warning or loading error.
 The confirmation screen repeats each selected operation before writing anything.
 
-When `--json` is active, stdout contains one versioned JSON value and diagnostics use stderr. Exit codes are `2` usage, `3` T3 compatibility, `4` safety refusal including live T3 or a corrupt import ledger, `5` source parsing, `6` write failure, and `7` reconciliation conflict.
+When `--json` is active, stdout contains one versioned JSON value and diagnostics use stderr. Exit codes are `2` usage, `3` T3 or native SQLite compatibility, `4` safety refusal including live T3 or a corrupt import ledger, `5` source parsing, `6` write failure, and `7` reconciliation conflict.
 
 ## Safety and storage
 

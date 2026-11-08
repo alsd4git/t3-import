@@ -17,6 +17,11 @@ keys, FTS search results and absence of queued provider effects. The database, s
 import ledger live only under that temporary directory and are removed at exit.
 No live `.t3`, Codex, Claude Code, or OpenCode data is accessed.
 
+The temporary install initially blocks all install scripts. Before repairing
+SQLite, the check verifies that `doctor` reports the missing native addon and
+an import with `--manage-runtime` fails at dependency preflight. It then
+explicitly approves/rebuilds only `better-sqlite3` and runs the import/sync checks.
+
 Database assertions run in a child process, which unloads the installed native
 SQLite addon before cleanup. This matters on Windows, where a loaded `.node`
 library cannot be deleted even after closing its database connection. Windows

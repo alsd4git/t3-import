@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Probe the native SQLite addon before database-dependent CLI operations and
+  before any runtime maintenance. Explain missing or incompatible bindings and
+  suggest an explicit npm repair command.
+- Report SQLite readiness in `doctor` and `runtime status`, keeping blocked native
+  installs diagnosable without an unhandled binding error.
+- Verify the installed package with native install scripts blocked before
+  approving/rebuilding SQLite and exercising import/sync.
+
 ## 0.1.7-alsd.1
 
 - Support T3 0.1.7 migration 79 with the pinned official persistence runtime and

@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import type { TargetPaths } from "../core/types.js";
 import { isV2Database, targetMigration } from "./schema.js";
 import { openRemoteDelegatedTasks, pendingSubagentDeliveries, pendingDelegatedRunDeliveries } from "./v2Work.js";
+import { inspectSQLiteDependency } from "../core/sqlite.js";
 
 export interface RuntimeActivity {
   status: "idle" | "busy" | "unknown";
@@ -174,6 +175,8 @@ function inspectV2(db: Database.Database, counts: Record<string, number>, work: 
 /** Read a single SQLite snapshot of persisted activity. This function never contacts or mutates T3. */
 export function inspectRuntimeActivity(paths: TargetPaths): RuntimeActivity {
   if (!existsSync(paths.dbPath)) return unknownActivity("T3 database does not exist.");
+  const sqlite = inspectSQLiteDependency();
+  if (!sqlite.available) return unknownActivity(sqlite.message);
   let db: Database.Database | undefined;
   try {
     db = new Database(paths.dbPath, { readonly: true, fileMustExist: true });

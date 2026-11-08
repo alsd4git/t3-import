@@ -17,6 +17,40 @@ Outstanding delegated run-cohort deliveries also count as busy, even when the
 origin run is terminal. T3 0.1.7 one-time schedules use the same due/running
 checks as recurring tasks; a future schedule remains a warning.
 
+## Native SQLite readiness
+
+Recent npm versions can install `t3-import` while blocking `better-sqlite3`'s
+native install script. `--version` can still work in that state. Database
+operations first open and query an in-memory database, so the dependency is
+checked before source loading or a service pause. Missing or incompatible
+bindings produce a concise repair suggestion instead of a list of searched
+binary paths. Unrelated SQLite errors do not suggest reinstalling the addon.
+
+`doctor --json` and `runtime status --json` expose
+`dependencies.sqlite.available`, the failure reason and an optional
+`repairCommand`. Missing bindings make runtime activity unknown, never idle.
+These diagnostics do not stop the service or apply a repair.
+
+For a global npm installation, allow only this package's rebuild script once:
+
+```sh
+npm rebuild --global better-sqlite3 --allow-scripts=better-sqlite3
+t3-import runtime status
+```
+
+Use npm from the same Node installation that runs `t3-import`. For a source
+checkout or project-local install under npm's script approval policy, approve
+the script in that project and rebuild there instead:
+
+```sh
+npm install-scripts approve better-sqlite3
+npm rebuild better-sqlite3
+```
+
+`--allow-scripts` is for global installs; recent npm rejects it on a project-scoped
+rebuild. The CLI suggests these explicit actions and does not install packages,
+run npm or change script approval settings automatically.
+
 ## Read-only commands with T3 running
 
 `list`, `show`, `doctor`, `links`, `rename-plan` and `runtime status` can run while T3 is open.

@@ -8,6 +8,7 @@ import { stdin as input, stdout as output } from "node:process";
 import { z } from "zod";
 import { ImportTui } from "./tui.js";
 import { ImporterError, safetyError, usageError } from "./core/errors.js";
+import { assertSQLiteDependency, inspectSQLiteDependency } from "./core/sqlite.js";
 import { validateDestinationOptions } from "./target/destination.js";
 import type { ImportRunResult, ReplaceRunResult, SourceName, SourceSummary, SyncRunResult } from "./core/types.js";
 import { sourceNames } from "./core/providers.js";
@@ -152,6 +153,9 @@ program
     const supported = action === program || ["import", "sync", "replace"].includes(action.name())
       || (action.name() === "reset" && action.parent?.name() === "cache");
     if (program.opts<{ manageRuntime?: boolean }>().manageRuntime && !supported) throw usageError("--manage-runtime is only available for import, sync, replace, and cache reset.");
+    const needsSQLite = supported || ["links", "rename-plan"].includes(action.name())
+      || (["list", "show"].includes(action.name()) && action.opts<{ source?: string }>().source === "opencode");
+    if (needsSQLite) assertSQLiteDependency();
   })
   .action(async () => {
     const paths = resolveTargetPaths(globalOverrides());
@@ -161,7 +165,7 @@ program
 
 program.command("runtime").description("Inspect the T3 process, persisted activity and service ownership")
   .command("status").description("Read runtime activity without stopping T3 or loading provider histories")
-  .action(async () => { print({ schemaVersion: 1, runtime: await inspectRuntimeStatus(resolveTargetPaths(globalOverrides())) }); });
+  .action(async () => { print({ schemaVersion: 1, dependencies: { sqlite: inspectSQLiteDependency() }, runtime: await inspectRuntimeStatus(resolveTargetPaths(globalOverrides())) }); });
 
 program.command("links")
   .description("Inspect provider bindings, origins and lineage without changing metadata or transcripts")
@@ -219,21 +223,27 @@ program.command("doctor")
   .description("Check source and T3 readiness without changing anything")
   .action(async () => {
     const paths = resolveTargetPaths(globalOverrides());
+    const sqlite = inspectSQLiteDependency();
     const runtime = await inspectRuntimeStatus(paths);
     let database: Record<string, unknown> = { exists: existsSync(paths.dbPath) };
     if (existsSync(paths.dbPath)) {
-      const db = openTargetReadSnapshot(paths);
-      try { database = { exists: true, ...validateTargetDatabase(db) }; }
+      let db: ReturnType<typeof openTargetReadSnapshot> | undefined;
+      try {
+        if (!sqlite.available) throw new Error(sqlite.message);
+        db = openTargetReadSnapshot(paths);
+        database = { exists: true, ...validateTargetDatabase(db) };
+      }
       catch (error) { database = { exists: true, compatible: false, error: error instanceof Error ? error.message : String(error) }; }
-      finally { db.close(); }
+      finally { db?.close(); }
     }
     const staging = existsSync(paths.attachmentsDir) ? readdirSync(paths.attachmentsDir).filter((name) => name.startsWith(".t3-import-staging-")) : [];
     const sources: Record<string, unknown> = {};
     for (const name of sourceNames) {
+      if (name === "opencode" && !sqlite.available) { sources[name] = { available: false, error: sqlite.message }; continue; }
       try { const items = await sourceAdapter(name).discover({}); sources[name] = { available: true, conversations: items.length, workspaces: new Set(items.map((item) => item.workspace)).size }; }
       catch (error) { sources[name] = { available: false, error: error instanceof Error ? error.message : String(error) }; }
     }
-    print({ schemaVersion: 1, target: paths, runtime, database, sources, indexedDbCaches: discoverT3CacheProfiles(), stagingDirectories: staging });
+    print({ schemaVersion: 1, target: paths, dependencies: { sqlite }, runtime, database, sources, indexedDbCaches: discoverT3CacheProfiles(), stagingDirectories: staging });
   });
 
 const cacheCommand = program.command("cache").description("Inspect or reset T3's rebuildable IndexedDB cache");
