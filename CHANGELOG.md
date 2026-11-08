@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.7-alsd.2
 
 - Probe the native SQLite addon before database-dependent CLI operations and
   before any runtime maintenance. Explain missing or incompatible bindings and

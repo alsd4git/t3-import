@@ -37,11 +37,11 @@ t3-import --version
 For a pinned GitHub release without the npm registry:
 
 ```sh
-npm i -g --allow-scripts=better-sqlite3 https://github.com/alsd4git/t3-import/releases/download/v0.1.3-alsd.1/alsdd-t3-import-0.1.3-alsd.1.tgz
+npm i -g --allow-scripts=better-sqlite3 https://github.com/alsd4git/t3-import/releases/download/v0.1.7-alsd.2/alsdd-t3-import-0.1.7-alsd.2.tgz
 ```
 
-Versions follow `<T3 version>-alsd.<revision>`. `0.1.3-alsd.1` targets T3 0.1.3
-and retains the earlier compatibility shown above. npm installs the default
+Versions follow `<T3 version>-alsd.<revision>`. `0.1.7-alsd.2` targets T3 0.1.7
+and retains the earlier compatibility shown below. npm installs the default
 `latest` channel; no `@next` suffix is required.
 
 The script approval allows the native SQLite dependency to install with recent
