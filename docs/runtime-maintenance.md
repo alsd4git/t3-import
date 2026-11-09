@@ -83,7 +83,8 @@ recompute their plans and retain the closed-runtime requirement.
 
 On Linux, the interactive importer offers **s** when it finds an idle runtime
 owned by a verified systemd service. A second screen asks for confirmation and
-explains that T3 Connect clients will disconnect. Otherwise, close T3 manually.
+explains that T3 Connect clients will disconnect. Windows also offers **s** for a verified packaged T3 Desktop in the same user
+and interactive session. Otherwise, close T3 manually.
 
 For scripts, explicitly opt in:
 
@@ -100,6 +101,28 @@ environment and restart policy. It never reconstructs a command from process
 arguments, kills the server PID, or invokes sudo. System units must already be
 manageable without an interactive authorization prompt.
 
+### Windows desktop
+
+Run the importer from PowerShell or Windows Terminal in the same desktop session
+and user as T3. Discovery checks the selected database's actual file owner using
+Windows Restart Manager, traces the runtime's parent processes to a packaged T3
+window, and records process creation times, user SID, session and executable hash.
+Custom launch arguments and non-default homes are refused. SSH cannot safely
+restore a window in another session, so it continues to require manual closure.
+Windows services and headless launchers are not managed by this desktop path.
+
+The importer requests a normal window close with `CloseMainWindow`, then waits
+for both desktop and backend to exit. It never calls `taskkill`, `Stop-Process`
+or Restart Manager shutdown. A close veto, timeout or changed activity refuses
+writes. Restoration launches the exact unchanged executable in the original
+user/session and waits for the selected runtime to respond. If it cannot do so,
+the recovery record remains and includes a PowerShell `Start-Process` command.
+There is no change to startup entries, scheduled tasks, services or npm settings.
+
+Closing the last window triggers T3's regular application shutdown in the pinned
+0.1.7 desktop lifecycle. A version that keeps running after a window close will
+fail the stopped-process check. Read-only commands and dry-runs never close T3.
+
 Activity is a snapshot, not a lock against new requests. The importer checks again
 before stopping and after the service has fully stopped, comparing durable work
 identities to detect work that arrived during shutdown. A changed snapshot
@@ -108,7 +131,7 @@ maintenance; clients and future scheduled tasks remain unavailable until restart
 
 Restoration runs after success, errors, TUI cancellation, Ctrl+C and SIGTERM. An
 operation already writing data finishes before restoration. The command waits for
-the same service's runtime to respond before exiting. JSON output is emitted after
+the same managed runtime to respond before exiting. JSON output is emitted after
 restoration; a restart failure reports an error and preserves the operation result.
 `--dry-run` never stops T3. A service that was initially stopped stays stopped.
 
@@ -124,7 +147,7 @@ systemctl --user start t3code.service
 ```
 
 SIGKILL, machine shutdown and loss of the importer process can prevent automatic
-restoration. Inspect the record, start the recorded service, and check
+restoration. Inspect the record, restart the recorded runtime, and check
 `t3-import runtime status`. Remove the record only after confirming that no
 maintenance command still owns it and recovery is complete. A new maintenance
 command refuses to overwrite an existing record.
@@ -144,3 +167,14 @@ isolated T3 and Codex homes, and a T3 0.1.2 fixture database. It tests real syst
 ownership, import and restore, error restoration, TUI cancellation, SIGTERM and
 busy refusal. It cleans up its own service and fixtures, without stopping
 `t3code.service` or modifying real conversations.
+
+On Windows, the test matrix also runs the native Restart Manager ownership probe:
+
+```powershell
+npx vitest run test/windowsDesktop.native.test.ts test/windowsDesktop.test.ts test/runtimeControl.test.ts
+```
+
+The native probe opens an isolated temporary file and verifies its actual owning
+Node PID, including a quoted filename. It never closes T3. A production Desktop
+close/reopen smoke test must run from that Desktop's own interactive session;
+SSH ownership probes do not establish that the GUI cycle passed.

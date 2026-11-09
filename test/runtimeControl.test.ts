@@ -112,3 +112,50 @@ describe("managed runtime maintenance", () => {
     expect(readFileSync(marker, "utf8")).toBe("existing record"); expect(f.run).not.toHaveBeenCalled();
   });
 });
+
+describe("Windows desktop maintenance policy", () => {
+  function desktopFixture() {
+    const f = fixture();
+    const desktop = { pid: 200, started: "2026-11-09T00:00:00Z", executable: "C:\\Programs\\T3 Code.exe", sha256: "a".repeat(64), sessionId: 1, ownerSid: "S-1-5-21-1", runtimePid: 101, runtimeStarted: "2026-11-09T00:00:01Z" };
+    const { service: _service, ...runtime } = f.status;
+    const status: RuntimeStatus = { ...runtime, desktop };
+    const stopped: RuntimeStatus = { ...status, live: false, stale: true };
+    const inspect = vi.fn().mockResolvedValueOnce(status).mockResolvedValueOnce(status).mockResolvedValue(stopped);
+    const windows = { close: vi.fn().mockResolvedValue(undefined), stopped: vi.fn().mockResolvedValue(true), start: vi.fn().mockResolvedValue(undefined), ready: vi.fn().mockResolvedValue(true) };
+    return { ...f, desktop, status, stopped, inspect, windows, timeoutMs: 1 };
+  }
+  it("closes and restores the verified desktop once without invoking systemctl", async () => {
+    const f = desktopFixture(); const lease = await pauseIdleRuntime(f.paths, f);
+    expect(f.windows.close).toHaveBeenCalledWith(f.desktop);
+    expect(f.run).not.toHaveBeenCalled();
+    expect(lease!.label).toBe("Windows T3 Desktop");
+    await lease!.restore(); await lease!.restore();
+    expect(f.windows.start).toHaveBeenCalledTimes(1);
+    expect(existsSync(runtimeMaintenancePath(f.paths))).toBe(false);
+  });
+  it.each(["busy", "unknown"] as const)("refuses %s Windows activity", async (status) => {
+    const f = desktopFixture();f.inspect.mockReset().mockResolvedValue({ ...f.status, activity: { ...f.status.activity, status } });
+    await expect(pauseIdleRuntime(f.paths, f)).rejects.toThrow("Automatic pause refused");
+    expect(f.windows.close).not.toHaveBeenCalled();
+  });
+  it("refuses changed desktop identity before close", async () => {
+    const f = desktopFixture();f.inspect.mockReset().mockResolvedValueOnce(f.status).mockResolvedValue({ ...f.status, desktop: { ...f.desktop, started: "reused-pid" } });
+    await expect(pauseIdleRuntime(f.paths, f)).rejects.toThrow("identity or activity changed");
+    expect(f.windows.close).not.toHaveBeenCalled();
+  });
+  it("refuses writes if the desktop or backend never exits", async () => {
+    const f = desktopFixture();f.windows.stopped.mockResolvedValue(false);
+    await expect(pauseIdleRuntime(f.paths, f)).rejects.toThrow("has not fully stopped");
+    expect(f.windows.start).toHaveBeenCalledOnce();
+  });
+  it("restores and refuses writes when work arrived during close", async () => {
+    const f = desktopFixture();f.inspect.mockReset().mockResolvedValueOnce(f.status).mockResolvedValueOnce(f.status).mockResolvedValue({ ...f.stopped, activity: { ...f.stopped.activity, fingerprint: "changed" } });
+    await expect(pauseIdleRuntime(f.paths, f)).rejects.toThrow("activity changed during shutdown");
+    expect(f.windows.start).toHaveBeenCalledOnce();
+  });
+  it("retains recovery information if the executable cannot be restored", async () => {
+    const f = desktopFixture();const lease = await pauseIdleRuntime(f.paths, f);f.windows.start.mockRejectedValue(new Error("binary changed"));
+    await expect(lease!.restore()).rejects.toThrow("Recovery: Start-Process -FilePath");
+    expect(JSON.parse(readFileSync(runtimeMaintenancePath(f.paths), "utf8")).desktop).toEqual(f.desktop);
+  });
+});

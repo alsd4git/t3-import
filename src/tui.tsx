@@ -19,7 +19,7 @@ import { sourceAdapter } from "./sources/index.js";
 import { compactThreadForImport, importConversations } from "./target/importer.js";
 import { inspectConversationSync, syncConversations } from "./target/sync.js";
 import { listProviderInstances } from "./target/config.js";
-import { inspectRuntimeStatus, type RuntimeStatus } from "./target/runtimeControl.js";
+import { inspectRuntimeStatus, runtimeOwnerLabel, type RuntimeStatus } from "./target/runtimeControl.js";
 import { runtimeActivityText } from "./target/runtimeActivity.js";
 import { launchT3Code } from "./target/launch.js";
 import { resetT3RebuildableCache } from "./target/cache.js";
@@ -441,7 +441,7 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
     }
     if (input === "q") { app.exit(); return; }
     if (screen === "blocked" && (input === "r" || key.return)) { checkRuntime(); return; }
-    if (screen === "blocked" && input === "s" && runtime?.activity.status === "idle" && runtime.service && onPauseRuntime) {
+    if (screen === "blocked" && input === "s" && runtime?.activity.status === "idle" && runtimeOwnerLabel(runtime) && onPauseRuntime) {
       setScreen("pause-confirm"); return;
     }
     if (screen === "pause-confirm") {
@@ -569,7 +569,7 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
   return <Box flexDirection="column" paddingX={1}>
     <Text bold color="cyan">t3-import</Text>
     <Text dimColor>Target: {paths.dbPath}</Text>
-    {managedService ? <Text color="yellow">Paused service: {managedService}. It will restart automatically when you exit.</Text> : null}
+    {managedService ? <Text color="yellow">Paused runtime: {managedService}. It will restart automatically when you exit.</Text> : null}
     <Box marginTop={1} flexDirection="column">
       {screen === "preflight" && <Text>Checking whether T3 is running…</Text>}
       {screen === "blocked" && <>
@@ -577,20 +577,20 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
         <Text>Close T3 before importing, syncing, or replacing{runtime?.pid ? ` (detected PID ${runtime.pid})` : ""}.</Text>
         {runtime?.activity ? <Text>{runtimeActivityText(runtime.activity)}</Text> : null}
         {runtime?.activity.warnings.map((warning) => <Text key={warning} color="yellow">{warning}</Text>)}
-        {runtime?.service ? <Text>Service: systemd {runtime.service.scope} · {runtime.service.unit}</Text> : <Text dimColor>{runtime?.managementUnavailable}</Text>}
+        {runtime && runtimeOwnerLabel(runtime) ? <Text>Runtime owner: {runtimeOwnerLabel(runtime)}</Text> : <Text dimColor>{runtime?.managementUnavailable}</Text>}
         {runtime?.origin ? <Text dimColor>Runtime: {runtime.origin}</Text> : null}
         {maintenanceError ? <Text color="red">{maintenanceError}</Text> : null}
-        {runtime?.activity.status === "idle" && runtime.service && onPauseRuntime ? <Text>Press s to pause the service and continue. It will restart automatically on exit.</Text> : null}
+        {runtime?.activity.status === "idle" && runtimeOwnerLabel(runtime) && onPauseRuntime ? <Text>Press s to pause T3 and continue. It will restart automatically on exit.</Text> : null}
         <Text>Press r or Enter to check again, or q to quit.</Text>
       </>}
       {screen === "pause-confirm" && <>
-        <Text bold>Pause {runtime?.service?.unit} for maintenance?</Text>
+        <Text bold>Pause {runtime ? runtimeOwnerLabel(runtime) : "T3"} for maintenance?</Text>
         <Text>T3 and T3 Connect clients will disconnect until this command exits.</Text>
-        <Text>The same systemd unit will restart after success, cancellation, or error.</Text>
+        <Text>The same T3 runtime will restart after success, cancellation, or error.</Text>
         <Text>Activity is checked again before stopping and before database writes.</Text>
         <Text>Press Enter to pause, Escape to go back, or q to quit.</Text>
       </>}
-      {screen === "maintenance" && <Text>Pausing the idle T3 service and verifying that it has stopped…</Text>}
+      {screen === "maintenance" && <Text>Pausing the idle T3 runtime and verifying that it has stopped…</Text>}
       {screen === "source" && <><Text bold>Choose a source</Text><Menu items={sourceNames.map(sourceLabel)} index={index} /></>}
       {screen === "workspace" && <><Text bold>Choose a workspace</Text>{summaries.length === 0 ? <Text>Discovering {source} conversations…</Text> : <Menu items={workspaces} index={index} />}</>}
       {screen === "provider" && <><Text bold>Choose a T3 provider instance</Text><Menu items={providers} index={index} /></>}

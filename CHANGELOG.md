@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Support explicit pause and restoration of an idle packaged Windows T3 Desktop
+  in the same user/session. Verify database ownership, process identity and binary
+  before a normal window close; refuse forced termination and cross-session SSH
+  restoration. Share activity and recovery checks with Linux service maintenance.
+
 ## 0.1.7-alsd.2
 
 - Probe the native SQLite addon before database-dependent CLI operations and

@@ -35,7 +35,7 @@ let pendingJson: unknown;
 let handlingSignals = false;
 function interrupt(signal: NodeJS.Signals): void {
   interrupted = signal;
-  console.error("Finishing the current operation and restoring the T3 service before exiting…");
+  console.error("Finishing the current operation and restoring T3 before exiting…");
   activeTui?.unmount();
 }
 const onInterrupt = () => interrupt("SIGINT");
@@ -50,7 +50,7 @@ async function pauseRuntime(paths: ReturnType<typeof resolveTargetPaths>): Promi
   try { maintenance = await maintenancePromise; }
   catch (cause) { maintenancePromise = undefined; throw cause; }
   if (interrupted) throw safetyError("Maintenance interrupted; restoring the original service.");
-  return maintenance?.service.unit;
+  return maintenance?.label;
 }
 async function prepareRuntime(paths: ReturnType<typeof resolveTargetPaths>, dryRun = false): Promise<void> {
   if (program.opts<{ manageRuntime?: boolean }>().manageRuntime && !dryRun) await pauseRuntime(paths);
@@ -59,7 +59,7 @@ async function runTui(props: React.ComponentProps<typeof ImportTui>): Promise<vo
   await prepareRuntime(props.paths);
   activeTui = render(React.createElement(ImportTui, {
     ...props,
-    ...(maintenance ? { initialManagedService: maintenance.service.unit } : {}),
+    ...(maintenance ? { initialManagedService: maintenance.label } : {}),
     onPauseRuntime: () => pauseRuntime(props.paths),
     onOperation: (operation) => { activeOperation = operation; },
   }));
@@ -148,7 +148,7 @@ program
   .option("--json", "write machine-readable JSON to stdout")
   .option("--no-color", "disable color output")
   .option("--no-cache-reset", "keep T3's existing IndexedDB cache after writes")
-  .option("--manage-runtime", "pause a verified idle systemd T3 service and restore it on exit")
+  .option("--manage-runtime", "pause a verified idle T3 runtime and restore it on exit")
   .hook("preAction", (_command, action) => {
     const supported = action === program || ["import", "sync", "replace"].includes(action.name())
       || (action.name() === "reset" && action.parent?.name() === "cache");
@@ -445,7 +445,7 @@ try {
       // A TUI exit or signal may arrive while the asynchronous stop is in flight.
       maintenance ??= await maintenancePromise;
       if (maintenance) {
-        console.error(`Restoring T3 service ${maintenance.service.unit}…`);
+        console.error(`Restoring T3 runtime ${maintenance.label}…`);
         await maintenance.restore();
         console.error("T3 service is ready.");
       }

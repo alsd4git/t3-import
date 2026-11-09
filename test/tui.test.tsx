@@ -56,24 +56,42 @@ describe("interactive TUI", () => {
       await new Promise((resolve) => setTimeout(resolve, 30));
       tui.stdin.write("s");
       if (status === "idle") {
-        await waitForFrame(tui, "Pause fixture.service for maintenance?");
+        await waitForFrame(tui, "Pause systemd user · fixture.service for maintenance?");
         expect(pause).not.toHaveBeenCalled();
         await new Promise((resolve) => setTimeout(resolve, 30));
         tui.stdin.write("\u001b");
         await waitForFrame(tui, "Press s to pause");
         await new Promise((resolve) => setTimeout(resolve, 30));
         tui.stdin.write("s");
-        await waitForFrame(tui, "Pause fixture.service for maintenance?");
+        await waitForFrame(tui, "Pause systemd user · fixture.service for maintenance?");
         await new Promise((resolve) => setTimeout(resolve, 30));
         inspect.mockResolvedValue({ exists: false, live: false, stale: false, activity: { status: "idle", counts: {}, warnings: [], fingerprint: "fixture" } });
         tui.stdin.write("\r");
-        await waitForFrame(tui, "Paused service: fixture.service");
+        await waitForFrame(tui, "Paused runtime: fixture.service");
         expect(pause).toHaveBeenCalledOnce();
       } else {
         await new Promise((resolve) => setTimeout(resolve, 20));
-        expect(tui.lastFrame()).not.toContain("Pause fixture.service for maintenance?");
+        expect(tui.lastFrame()).not.toContain("Pause systemd user · fixture.service for maintenance?");
         expect(pause).not.toHaveBeenCalled();
       }
+    } finally { tui.unmount(); inspect.mockRestore(); }
+  });
+
+  it("offers a separate confirmation before pausing Windows Desktop", async () => {
+    const inspect = vi.spyOn(runtimeControl, "inspectRuntimeStatus").mockResolvedValue({
+      exists: true, live: true, stale: false, pid: 123,
+      activity: { status: "idle", counts: {}, warnings: [], fingerprint: "fixture" },
+      desktop: { pid: 122, started: "desktop", executable: "C:\\T3 Code.exe", sha256: "a".repeat(64), sessionId: 1, ownerSid: "sid", runtimePid: 123, runtimeStarted: "backend" },
+    });
+    const pause = vi.fn().mockResolvedValue("Windows T3 Desktop");
+    const tui = render(<ImportTui paths={paths} onPauseRuntime={pause} />);
+    try {
+      await waitForFrame(tui, "Press s to pause");
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      tui.stdin.write("s");
+      await waitForFrame(tui, "Pause Windows T3 Desktop for maintenance?");
+      expect(pause).not.toHaveBeenCalled();
+      expect(tui.lastFrame()).not.toContain("systemd");
     } finally { tui.unmount(); inspect.mockRestore(); }
   });
 

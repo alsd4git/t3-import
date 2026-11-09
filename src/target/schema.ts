@@ -98,7 +98,7 @@ export async function assertT3Closed(paths: TargetPaths): Promise<RuntimeState> 
   const runtime = await inspectRuntime(paths);
   if (runtime.live) {
     const { inspectRuntimeActivity, runtimeActivityText } = await import("./runtimeActivity.js");
-    throw safetyError(`T3 is running${runtime.pid ? ` (PID ${runtime.pid})` : ""}. ${runtimeActivityText(inspectRuntimeActivity(paths))} Close T3 before importing, or use --manage-runtime for a verified idle systemd service.`);
+    throw safetyError(`T3 is running${runtime.pid ? ` (PID ${runtime.pid})` : ""}. ${runtimeActivityText(inspectRuntimeActivity(paths))} Close T3 before importing, or use --manage-runtime for a verified idle runtime.`);
   }
   return runtime;
 }
