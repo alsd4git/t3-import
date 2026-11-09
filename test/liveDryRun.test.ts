@@ -133,6 +133,8 @@ it.each(["import", "sync", "replace"])("rejects incomplete %s dry-run instead of
   expect(JSON.parse(result.stdout).error).toContain("Dry-run");
 });
 
+// This case launches two CLIs, performs a real import/backup and decompresses
+// source history. Give that combined work its own hosted-runner budget.
 it("sync-all dry-run loads compressed sources with T3 open and leaves all data unchanged", () => {
   const home = join(root, "t3");
   const paths = createTarget(home, 76);
@@ -149,7 +151,7 @@ it("sync-all dry-run loads compressed sources with T3 open and leaves all data u
   expect(JSON.parse(result.stdout)).toMatchObject({ status: "dry-run", hasConflicts: false, backup: null, results: [{ turnsAdded: 1 }] });
   expect(result.stderr).not.toContain("unsettled");
   expect(snapshot(root)).toEqual(before);
-});
+}, process.platform === "win32" ? 60_000 : 15_000);
 
 it("CLI rename-plan prepares a native call while T3 is open without applying the title", () => {
   const home = join(root, "t3");
