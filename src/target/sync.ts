@@ -17,7 +17,7 @@ import { checkpointForThread, legacyTurnSemanticHash, parseCheckpoint, turnSeman
 import { canonicalPath, deterministicUuid, isObject, sha256, stringValue } from "../core/util.js";
 import { safetyError, writeError } from "../core/errors.js";
 import type { ProviderSelection, TargetOverrides } from "./config.js";
-import { openTargetReadSnapshot, assertT3Closed, isV2Database, targetMigration, validateTargetDatabase } from "./schema.js";
+import { committedTargetIntegrity, openTargetReadSnapshot, assertT3Closed, isV2Database, targetMigration, validateTargetDatabase } from "./schema.js";
 import { assertV2ThreadSettled, prepareV2Write, v2ProviderThreads, v2SourceConflict, v2Thread, v2ThreadWorkWarning } from "./v2.js";
 import { threadWorkingDirectory } from "./destination.js";
 import { listImports, recordImports, type LedgerRecord, type StoredLedgerRecord } from "./ledger.js";
@@ -838,6 +838,8 @@ export async function syncConversations(selections: SyncSelection[], paths: Targ
       assets.cleanup();
       throw error;
     }
+    const integrity = committedTargetIntegrity(paths);
+    if (integrity !== "ok") throw writeError(`Post-sync integrity check failed: ${integrity}`);
     if (ledgerRecords.length) {
       try { recordImports(ledgerRecords); }
       catch (error) {
@@ -845,8 +847,6 @@ export async function syncConversations(selections: SyncSelection[], paths: Targ
         warnings.push(`V2 synchronization committed, but the external ledger could not be updated: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
-    const integrity = String(db.pragma("integrity_check", { simple: true }));
-    if (integrity !== "ok") throw writeError(`Post-sync integrity check failed: ${integrity}`);
     return { schemaVersion: 1, status: aggregate(plans.map((plan) => plan.result), false), target: paths.dbPath, migration: schema.migration, backup, results: plans.map((plan) => plan.result), warnings, hasConflicts: plans.some((plan) => hasConflict(plan.result.status)) };
   } catch (error) {
     if (v2Committed) throw writeError(`V2 synchronization committed, but post-write verification or bookkeeping failed: ${error instanceof Error ? error.message : String(error)}. Attachments were retained. Inspect the target and recover the external ledger before further writes.`, error);

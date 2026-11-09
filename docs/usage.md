@@ -151,6 +151,10 @@ and Ubuntu. See [package validation](package-validation.md).
 
 - Close T3 before every real import. There is deliberately no force bypass.
 - Every write creates and verifies a timestamped SQLite backup under `<state-dir>/t3-import-backups/`.
+- Post-write integrity checks use a fresh read-only SQLite snapshot. A connection
+  opened before the V2 runtime writes can retain stale FTS internals and report
+  corruption despite a healthy committed index. The check does not rebuild or
+  bypass the index.
 - Automatic backups cover the T3 database and, when reset, its IndexedDB cache. They do not include the external import ledger. Keep a separate consistent ledger backup if you need recovery. If a ledger is corrupt, preserve it and its WAL/SHM sidecars; restore a verified user-maintained backup if available, or investigate recovery before further writes. Do not simply delete it, since it may contain replacement history.
 - Successful imports, syncs, and replacements reset T3's rebuildable IndexedDB origin cache by default. The cache is moved aside, copied and verified under the same backup directory before removal; use `--no-cache-reset` to opt out.
 - V1 writes append `orchestration_events` and stopped rows in `provider_session_runtime`; T3 projects them at startup. V2 writes use the official event sink and projection stores bundled separately from the pinned 0.1.0 and 0.1.1 sources. The importer does not maintain a second projection implementation.

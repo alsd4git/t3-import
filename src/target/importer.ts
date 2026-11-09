@@ -28,7 +28,7 @@ import { checkpointForThread } from "../core/checkpoint.js";
 import { sourceDriver } from "../core/providers.js";
 import { safetyError, writeError } from "../core/errors.js";
 import { resolveProviderSelection, type TargetOverrides } from "./config.js";
-import { openTargetReadSnapshot, assertT3Closed, validateTargetDatabase } from "./schema.js";
+import { committedTargetIntegrity, openTargetReadSnapshot, assertT3Closed, validateTargetDatabase } from "./schema.js";
 import { recordImports, type LedgerRecord } from "./ledger.js";
 import { importDestination, threadWorkingDirectory, validateDestinationOptions, type DestinationOptions } from "./destination.js";
 import { isV2Database } from "./schema.js";
@@ -624,7 +624,7 @@ export async function importConversations(
       assets.cleanup();
       throw error;
     }
-    const integrity = String(db.pragma("integrity_check", { simple: true }));
+    const integrity = committedTargetIntegrity(paths);
     if (integrity !== "ok") throw writeError(`Post-import integrity check failed: ${integrity}`);
     try { recordImports(ledger); } catch (error) { runWarnings.push(`Import succeeded, but the external ledger could not be updated: ${error instanceof Error ? error.message : String(error)}`); }
     return { schemaVersion: 1, status: aggregateStatus(results, false), target: paths.dbPath, migration: schema.migration, backup, results, warnings: runWarnings };

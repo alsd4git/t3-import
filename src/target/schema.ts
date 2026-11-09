@@ -87,6 +87,13 @@ export function openTargetReadSnapshot(paths: TargetPaths): Database.Database {
   }
 }
 
+/** A separate writer may invalidate FTS internals cached by a pre-write reader. */
+export function committedTargetIntegrity(paths: TargetPaths): string {
+  const db = openTargetReadSnapshot(paths);
+  try { return String(db.pragma("integrity_check", { simple: true })); }
+  finally { db.close(); }
+}
+
 export async function assertT3Closed(paths: TargetPaths): Promise<RuntimeState> {
   const marker = runtimeMaintenancePath(paths);
   if (existsSync(marker)) {

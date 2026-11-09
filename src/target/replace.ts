@@ -17,7 +17,7 @@ import { deterministicUuid, isObject, stringValue } from "../core/util.js";
 import { safetyError, writeError } from "../core/errors.js";
 import type { TargetOverrides } from "./config.js";
 import { listImports, recordConsolidation, type LedgerRecord, type StoredLedgerRecord } from "./ledger.js";
-import { openTargetReadSnapshot, assertT3Closed, isV2Database, validateTargetDatabase } from "./schema.js";
+import { committedTargetIntegrity, openTargetReadSnapshot, assertT3Closed, isV2Database, validateTargetDatabase } from "./schema.js";
 import { assertV2ThreadSettled, prepareV2Write, v2SourceConflict, v2Thread } from "./v2.js";
 import { threadWorkingDirectory } from "./destination.js";
 import {
@@ -357,7 +357,7 @@ export async function replaceConversations(selections: ReplaceSelection[], paths
       assets.cleanup();
       throw error;
     }
-    const integrity = String(db.pragma("integrity_check", { simple: true }));
+    const integrity = committedTargetIntegrity(paths);
     if (integrity !== "ok") throw writeError(`Post-replacement integrity check failed: ${integrity}`);
     for (const update of ledgerUpdates) {
       try { recordConsolidation(update.old, update.next); }
