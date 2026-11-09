@@ -14,6 +14,8 @@
   in the same user/session. Verify database ownership, process identity and binary
   before a normal window close; refuse forced termination and cross-session SSH
   restoration. Share activity and recovery checks with Linux service maintenance.
+- Refuse unsupported Windows homes and database paths before starting native
+  ownership inspection, keeping startup checks responsive for unmanaged runtimes.
 
 ## 0.1.7-alsd.2
 

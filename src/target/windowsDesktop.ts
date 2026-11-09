@@ -1,5 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { homedir } from "node:os";
+import { win32 } from "node:path";
 import { safetyError } from "../core/errors.js";
 import type { TargetPaths } from "../core/types.js";
 
@@ -83,10 +85,15 @@ export async function windowsFileOwners(databasePath: string, run: PowerShellRun
   return owners;
 }
 export async function discoverWindowsDesktop(paths: TargetPaths, runtimePid: number, run: PowerShellRunner = powershell): Promise<WindowsDesktop> {
+  // Refuse unsupported locations before starting PowerShell or compiling native probes.
+  const normalized = (path: string) => win32.resolve(path).toLowerCase();
+  const home = normalized(win32.join(homedir(), ".t3"));
+  const state = win32.join(home, "userdata");
+  if (normalized(paths.t3Home) !== home || normalized(paths.stateDir) !== state) throw safetyError("Custom T3 homes require manual maintenance.");
+  const database = normalized(paths.dbPath);
+  if (win32.dirname(database) !== state || !["statev2.sqlite", "state.sqlite"].includes(win32.basename(database))) throw safetyError("Custom database paths require manual maintenance.");
   if (!(await windowsFileOwners(paths.dbPath, run)).includes(runtimePid)) throw safetyError("The recorded runtime does not own the selected database.");
   const result = JSON.parse(await run(payload({ db: paths.dbPath, home: paths.t3Home, stateDir: paths.stateDir, runtimePid }) + helpers + String.raw`
- if([IO.Path]::GetFullPath($v.home).TrimEnd('\') -ine (Join-Path $env:USERPROFILE '.t3') -or [IO.Path]::GetFullPath($v.stateDir).TrimEnd('\') -ine (Join-Path $env:USERPROFILE '.t3\userdata')){throw 'Custom T3 homes require manual maintenance'}
- if([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($v.db)) -ine $v.stateDir -or [IO.Path]::GetFileName($v.db) -notin @('statev2.sqlite','state.sqlite')){throw 'Custom database paths require manual maintenance'}
  $runtime=ProcessInfo $v.runtimePid; $p=$runtime; $visited=@{}
  while($null -ne $p -and -not $visited.ContainsKey([int]$p.ProcessId)) {
   $visited[[int]$p.ProcessId]=$true

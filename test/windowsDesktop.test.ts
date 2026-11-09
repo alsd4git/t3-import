@@ -4,15 +4,22 @@ import { resolveTargetPaths } from "../src/target/config.js";
 
 const desktop: WindowsDesktop = { pid: 200, started: "2026-11-09T00:00:00Z", executable: "C:\\Programs\\T3 Code.exe", sha256: "a".repeat(64), sessionId: 1, ownerSid: "S-1-5-21-1", runtimePid: 201, runtimeStarted: "2026-11-09T00:00:01Z" };
 describe("Windows desktop command boundaries", () => {
-  it("keeps executable and database names as JSON data, not PowerShell source", async () => {
+  it("keeps executable names as JSON data, not PowerShell source", async () => {
     const hostile = "C:\\a'; Stop-Process -Id 1; #.exe";
     const run = vi.fn().mockResolvedValueOnce("[201]").mockResolvedValue(JSON.stringify(desktop));
-    await discoverWindowsDesktop(resolveTargetPaths({ dbPath: hostile }), 201, run);
+    await discoverWindowsDesktop(resolveTargetPaths(), 201, run);
     await closeWindowsDesktop({ ...desktop, executable: hostile }, run);
     await startWindowsDesktop({ ...desktop, executable: hostile }, run);
     for (const [script] of run.mock.calls) {
       expect(script).not.toContain(hostile);
       expect(script).not.toContain("Stop-Process");
+    }
+  });
+  it("refuses custom homes and database paths without starting a native probe", async () => {
+    for (const paths of [resolveTargetPaths({ t3Home: "C:\\custom-home" }), { ...resolveTargetPaths(), dbPath: "C:\\a'; Stop-Process -Id 1; #.sqlite" }]) {
+      const run = vi.fn();
+      await expect(discoverWindowsDesktop(paths, 201, run)).rejects.toThrow(/Custom T3 homes|Custom database paths/u);
+      expect(run).not.toHaveBeenCalled();
     }
   });
   it("rejects malformed or mismatched ownership reports", async () => {
