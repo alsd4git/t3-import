@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Toggle the interactive chooser between workspaces and all conversations ordered
+  by recent update with `v`. Retain batch selections, show their count and scroll
+  long lists. Enter reviews the highlighted eligible row when none are selected.
+- Preserve each conversation's working directory in batches spanning workspaces,
+  using its matching destination project without changing Codex project metadata.
+
 - Verify committed imports, syncs and replacements through a fresh SQLite reader.
   Avoid false FTS corruption reports from pre-write connection caches after the
   pinned V2 runtime commits, while retaining detection of genuine index damage.

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Database from "better-sqlite3";
 import { Box, Text, useApp, useInput } from "ink";
 import type {
@@ -87,8 +87,9 @@ interface TuiProps {
 
 export function helpTextForScreen(screen: Screen, searching = false): string | undefined {
   if (searching) return "Type to search  Backspace delete  Enter apply  Esc cancel";
-  if (screen === "threads") return "↑/↓ or j/k move  Space select  a all  / search  Enter continue  Esc back/quit  q quit";
-  if (screen === "source" || screen === "workspace" || screen === "provider" || screen === "destination") return "↑/↓ or j/k move  Enter choose  Esc back/quit  q quit";
+  if (screen === "threads") return "↑/↓ or j/k move  Space select  a all  / search  Enter review  v view  Esc back/quit  q quit";
+  if (screen === "workspace") return "↑/↓ or j/k move  Enter choose  v all conversations  Esc back/quit  q quit";
+  if (screen === "source" || screen === "provider" || screen === "destination") return "↑/↓ or j/k move  Enter choose  Esc back/quit  q quit";
   if (screen === "review") return "Enter confirm  Esc back  q quit";
   if (screen === "result") return "↑/↓ or j/k move  Enter confirm  q quit";
   return undefined;
@@ -104,13 +105,15 @@ export function selectionMarker(isSelected: boolean, isDisabled: boolean): strin
   return isSelected ? "◉" : "○";
 }
 
-function Menu({ items, index, selected, disabled }: { items: string[]; index: number; selected?: Set<number>; disabled?: Set<number> }): React.JSX.Element {
-  return <Box flexDirection="column">{items.map((item, itemIndex) => {
+function Menu({ items, index, selected, disabled, maxVisible = items.length }: { items: string[]; index: number; selected?: Set<number>; disabled?: Set<number>; maxVisible?: number }): React.JSX.Element {
+  const start = Math.max(0, Math.min(index - Math.floor(maxVisible / 2), items.length - maxVisible));
+  return <Box flexDirection="column">{items.slice(start, start + maxVisible).map((item, offset) => {
+    const itemIndex = start + offset;
     const isDisabled = disabled?.has(itemIndex) ?? false;
     return <Text key={`${itemIndex}:${item}`} dimColor={isDisabled} {...(itemIndex === index && !isDisabled ? { color: "cyan" as const } : {})}>
       {itemIndex === index ? "›" : " "} {selected ? selectionMarker(selected.has(itemIndex), isDisabled) : ""} {item}
     </Text>;
-  })}</Box>;
+  })}{items.length > maxVisible ? <Text dimColor>Rows {start + 1} to {Math.min(start + maxVisible, items.length)} of {items.length}</Text> : null}</Box>;
 }
 
 export function StartT3Prompt({ index }: { index: number }): React.JSX.Element {
@@ -137,12 +140,13 @@ export function ReplacementReview({
   const taskWord = counts.tasks === 1 ? "task" : "tasks";
   return <>
     <Text bold>Review replacement</Text>
-    <Text>Workspace: {workspace}</Text>
+    <Text>Workspace: {workspace ?? "Multiple workspaces"}</Text>
     <Box marginTop={1} flexDirection="column">
       {selections.map((selection) => {
         const preview = previews.get(selection.conversation.summary.id);
         return <Box key={`replacement-review:${selection.conversation.summary.id}`} flexDirection="column">
           <Text bold>{selection.conversation.summary.title}</Text>
+          {!workspace ? <Text>Working directory: {selection.conversation.summary.workspace}</Text> : null}
           <Text>Old T3 task: {preview?.oldThreadId}</Text>
           <Text>New T3 task: {preview?.newThreadId}</Text>
         </Box>;
@@ -242,6 +246,8 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
   const [source, setSource] = useState<SourceName>(initialSource ?? "codex");
   const [summaries, setSummaries] = useState<SourceSummary[]>([]);
   const [workspace, setWorkspace] = useState<string>();
+  const [browseMode, setBrowseMode] = useState<"workspace" | "recent">("workspace");
+  const initialWorkspaceApplied = useRef(false);
   const [provider, setProvider] = useState<string | undefined>(initialProvider);
   const [destinationChoices, setDestinationChoices] = useState<TuiDestinationChoice[]>([]);
   const [destinationError, setDestinationError] = useState<string>();
@@ -275,9 +281,14 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
   const workspaces = useMemo(() => [...new Map(summaries.map((summary) => [summary.workspace.toLowerCase(), summary.workspace])).values()], [summaries]);
   const providers = useMemo(() => listProviderInstances(paths, source), [paths, source]);
   const visibleThreads = useMemo(() => summaries
-    .filter((summary) => !workspace || summary.workspace.toLowerCase() === workspace.toLowerCase())
+    .filter((summary) => browseMode === "recent" || !workspace || summary.workspace.toLowerCase() === workspace.toLowerCase())
+    .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .filter((summary) => mode !== "replace" || !replacePreviews.has(summary.id) || replacePreviews.get(summary.id)?.previouslyImported)
-    .filter((summary) => !query || summary.title.toLowerCase().includes(query.toLowerCase()) || summary.id.includes(query)), [mode, query, replacePreviews, summaries, workspace]);
+    .filter((summary) => !query || summary.title.toLowerCase().includes(query.toLowerCase()) || summary.workspace.toLowerCase().includes(query.toLowerCase()) || summary.id.includes(query)), [browseMode, mode, query, replacePreviews, summaries, workspace]);
+  const destinationWorkspace = useMemo(() => {
+    const roots = [...new Map(preparedImports.map(({ conversation }) => [canonicalPath(conversation.summary.workspace), conversation.summary.workspace])).values()];
+    return roots.length === 1 ? roots[0] : undefined;
+  }, [preparedImports]);
   const operationFor = useCallback((summary: SourceSummary): "replace" | "regular" | undefined => {
     const preview = syncPreviews.get(summary.id);
     const replacement = replacePreviews.get(summary.id);
@@ -356,6 +367,12 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
   }, [initialSource, paths]);
 
   useEffect(() => { checkRuntime(); }, [checkRuntime]);
+  useEffect(() => {
+    initialWorkspaceApplied.current = false;
+    setSummaries([]); setWorkspace(undefined); setBrowseMode("workspace"); setQuery("");
+    setSelected(new Set()); setConversations(new Map()); setSyncPreviews(new Map());
+    setReplacePreviews(new Map()); setInspectionErrors(new Map()); setPendingStatuses(0);
+  }, [source, paths]);
 
   useEffect(() => {
     if (screen !== "workspace") return;
@@ -363,11 +380,14 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
     setIndex(0);
     sourceAdapter(source).discover({}).then((items) => {
       if (cancelled) return;
-      setSummaries(items);
-      const selectedWorkspace = initialWorkspace
+      const unique = new Map<string, SourceSummary>();
+      for (const item of items) if (!unique.has(item.id)) unique.set(item.id, item);
+      setSummaries([...unique.values()]);
+      const selectedWorkspace = initialWorkspace && !initialWorkspaceApplied.current
         ? items.find((item) => item.workspace.toLowerCase() === initialWorkspace.toLowerCase())?.workspace
         : undefined;
       if (selectedWorkspace) {
+        initialWorkspaceApplied.current = true;
         setWorkspace(selectedWorkspace);
         setProvider(initialProvider ?? providers[0]);
         // An explicit --workspace bypasses the chooser and its navigation history.
@@ -378,22 +398,19 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
   }, [screen, source]);
 
   useEffect(() => {
-    if (screen !== "threads" || !workspace) return;
+    if (screen !== "threads" || (browseMode === "workspace" && !workspace)) return;
     let cancelled = false;
-    const items = summaries.filter((summary) => summary.workspace.toLowerCase() === workspace.toLowerCase());
+    const items = summaries.filter((summary) => (browseMode === "recent" || summary.workspace.toLowerCase() === workspace!.toLowerCase())
+      && !conversations.has(summary.id));
     const queue = [...items];
+    setInspectionErrors((current) => { const next = new Map(current); for (const item of items) next.delete(item.id); return next; });
     setPendingStatuses(items.length);
-    setSelected(new Set());
-    setConversations(new Map());
-    setSyncPreviews(new Map());
-    setReplacePreviews(new Map());
-    setInspectionErrors(new Map());
     const worker = async () => {
       while (!cancelled) {
         const summary = queue.shift();
         if (!summary) return;
         try {
-          const conversation = await sourceAdapter(source).load(summary, { workspace });
+          const conversation = await sourceAdapter(source).load(summary, { workspace: summary.workspace });
           const preview = mode === "replace" ? undefined : await inspectConversationSync(conversation, paths);
           const replacement = mode === "replace" || preview?.status === "history-diverged"
             ? await inspectConversationReplacement(conversation, paths)
@@ -403,7 +420,7 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
           if (preview) setSyncPreviews((current) => new Map(current).set(summary.id, preview));
           if (replacement) setReplacePreviews((current) => new Map(current).set(summary.id, replacement));
           setSummaries((current) => current.map((item) => item.id === summary.id
-            ? { ...item, title: conversation.summary.title, updatedAt: conversation.summary.updatedAt, status: conversation.summary.status }
+            ? { ...item, title: conversation.summary.title, status: conversation.summary.status }
             : item));
         } catch (cause) {
           if (!cancelled) setInspectionErrors((current) => new Map(current).set(summary.id,
@@ -415,12 +432,17 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
     };
     void Promise.all(Array.from({ length: Math.min(3, items.length) }, () => worker()));
     return () => { cancelled = true; };
-  }, [mode, paths, screen, source, workspace]);
+  }, [browseMode, mode, paths, screen, source, workspace]);
 
   useEffect(() => {
-    if (screen !== "destination" || !workspace) return;
+    if (screen !== "destination") return;
+    if (!destinationWorkspace) {
+      setDestinationChoices([{ label: "Use each conversation's workspace project (default)" }]);
+      setDestinationError(undefined); setDestinationOptions({}); setIndex(0);
+      return;
+    }
     try {
-      setDestinationChoices(discoverTuiDestinations(paths, workspace));
+      setDestinationChoices(discoverTuiDestinations(paths, destinationWorkspace));
       setDestinationError(undefined);
       setDestinationOptions({});
       setIndex(0);
@@ -428,7 +450,7 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
       setDestinationError(cause instanceof Error ? cause.message : String(cause));
       setDestinationChoices([]);
     }
-  }, [paths, screen, workspace]);
+  }, [paths, screen, destinationWorkspace]);
 
   const move = (delta: number, length: number) => setIndex((current) => length === 0 ? 0 : (current + delta + length) % length);
   useInput((input, key) => {
@@ -459,6 +481,17 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
       }
       return;
     }
+    if (input === "v" && (screen === "workspace" || screen === "threads")) {
+      if (screen === "workspace" && summaries.length > 0) {
+        setBrowseMode("recent"); setProvider(initialProvider ?? providers[0]); navigate("threads");
+      } else if (screen === "threads" && browseMode === "workspace") {
+        setBrowseMode("recent"); setIndex(0);
+      } else if (screen === "threads") {
+        setBrowseMode("workspace"); setScreen("workspace"); setIndex(0);
+        setScreenHistory((history) => history.at(-1) === "workspace" ? history.slice(0, -1) : history);
+      }
+      return;
+    }
     if (key.upArrow || input === "k") {
       move(-1, screen === "source" ? sourceNames.length : screen === "result" ? 2 : screen === "workspace" ? workspaces.length : screen === "provider" ? providers.length : screen === "destination" ? destinationChoices.length : visibleThreads.length);
       return;
@@ -480,7 +513,7 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
       setSource(sourceNames[index]!); setSelected(new Set()); setPreparedImports([]); setPreparedSync([]); setPreparedReplacements([]); navigate("workspace"); return;
     }
     if (screen === "workspace" && key.return && workspaces[index]) {
-      setWorkspace(workspaces[index]); setProvider(initialProvider ?? providers[0]); navigate("threads"); return;
+      setBrowseMode("workspace"); setWorkspace(workspaces[index]); setProvider(initialProvider ?? providers[0]); navigate("threads"); return;
     }
     if (screen === "provider" && key.return && providers[index]) {
       setProvider(providers[index]); navigate(preparedImports.length ? "destination" : "threads"); return;
@@ -503,8 +536,12 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
         const id = visibleThreads[index]!.id;
         setSelected((value) => { const next = new Set(value); if (next.has(id)) next.delete(id); else next.add(id); return next; }); return;
       }
-      if (key.return && selected.size > 0) {
-        const chosen = summaries.filter((summary) => selected.has(summary.id));
+      if (key.return) {
+        const focused = visibleThreads[index];
+        const selection = selected.size > 0 ? selected : focused && canSelect(focused) ? new Set([focused.id]) : new Set<string>();
+        if (!selection.size) return;
+        setSelected(selection);
+        const chosen = summaries.filter((summary) => selection.has(summary.id));
         const imports: ImportSelection[] = [];
         const syncs: SyncSelection[] = [];
         const replacements: ReplaceSelection[] = [];
@@ -592,11 +629,11 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
       </>}
       {screen === "maintenance" && <Text>Pausing the idle T3 runtime and verifying that it has stopped…</Text>}
       {screen === "source" && <><Text bold>Choose a source</Text><Menu items={sourceNames.map(sourceLabel)} index={index} /></>}
-      {screen === "workspace" && <><Text bold>Choose a workspace</Text>{summaries.length === 0 ? <Text>Discovering {source} conversations…</Text> : <Menu items={workspaces} index={index} />}</>}
+      {screen === "workspace" && <><Text bold>Choose a workspace</Text>{summaries.length === 0 ? <Text>Discovering {source} conversations…</Text> : <Menu items={workspaces} index={index} maxVisible={10} />}</>}
       {screen === "provider" && <><Text bold>Choose a T3 provider instance</Text><Menu items={providers} index={index} /></>}
       {screen === "destination" && <><Text bold>Choose a T3 destination for new imports</Text><Text dimColor>Available choices preserve the source working directory.</Text>{destinationError ? <Text color="red">{destinationError}</Text> : destinationChoices.length ? <Menu items={destinationChoices.map((choice) => choice.label)} index={index} /> : <Text>Checking available destinations…</Text>}</>}
       {screen === "threads" && <>
-        <Text bold>{mode === "sync" ? "Select conversations to sync" : mode === "replace" ? "Select conversations to replace" : "Select conversations"} — {workspace}</Text>
+        <Text bold>{mode === "sync" ? "Select conversations to sync" : mode === "replace" ? "Select conversations to replace" : "Select conversations"} — {browseMode === "recent" ? "All conversations · most recent first" : workspace}</Text>
         {searching || query ? <Text color="yellow">Search: {query}<Text dimColor>_</Text></Text> : null}
         <Menu items={visibleThreads.map((item) => {
           const syncText = conversationStatusText(syncPreviews.get(item.id), checkingStatuses);
@@ -607,7 +644,9 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
               ? "history changed · replace available"
               : syncText;
           return `${item.title}  ${status}`;
-        })} index={index} selected={selectedVisible} disabled={disabledVisible} />
+        })} index={index} selected={selectedVisible} disabled={disabledVisible} maxVisible={8} />
+        <Text>Selected: {selected.size}{selected.size ? " · Enter reviews selected conversations" : " · Enter reviews highlighted conversation; Space selects for a batch"}</Text>
+        {browseMode === "recent" && visibleThreads[index] ? <Text dimColor>Working directory: {visibleThreads[index]!.workspace}</Text> : null}
         {mode !== "replace" ? <Text dimColor>
           New: {statusCounts.new}{" · To sync: "}{statusCounts.syncable}
           {" · Current: "}{statusCounts.current}{" · Active only: "}{statusCounts.active}
@@ -625,17 +664,18 @@ export function ImportTui({ paths, initialSource, initialWorkspace, initialProvi
       </>}
       {screen === "review" && <>
         {preparedReplacements.length ? <>
-          <ReplacementReview workspace={workspace} selections={preparedReplacements} previews={replacePreviews} counts={replacementPreview} resetCache={resetCache} />
+          <ReplacementReview workspace={browseMode === "recent" ? undefined : workspace} selections={preparedReplacements} previews={replacePreviews} counts={replacementPreview} resetCache={resetCache} />
         </> : <>
           <Text bold>Review changes</Text>
-          <Text>Source: {source} · Workspace: {workspace}</Text>
-          {preparedImports.length ? <><Text>Source working directory: {workspace}</Text><Text>Effective T3 working directory: {workspace}</Text><Text>Destination: {destinationChoices.find((choice) => JSON.stringify(choice.options ?? {}) === JSON.stringify(destinationOptions))?.label ?? "Use workspace project automatically"}</Text></> : null}
+          <Text>Source: {source} · Workspace: {destinationWorkspace ?? (browseMode === "recent" ? "Multiple workspaces" : workspace)}</Text>
+          {preparedImports.length ? <><Text>Source working directory: {destinationWorkspace ?? "Each selected conversation keeps its own directory"}</Text><Text>Effective T3 working directory: {destinationWorkspace ?? "Each selected conversation keeps its own directory"}</Text><Text>Destination: {destinationChoices.find((choice) => JSON.stringify(choice.options ?? {}) === JSON.stringify(destinationOptions))?.label ?? "Use workspace project automatically"}</Text></> : null}
           <Text>New tasks: {importPreview.tasks} · synchronized tasks: {syncPreview.tasks}</Text>
           <Text>Imported turns: {importPreview.turns} · added turns: {syncPreview.turns} · adopted turns: {syncPreview.adopted}</Text>
           <Text>Messages: {importPreview.messages} · activities: {importPreview.activities} · attachments: {importPreview.attachments}</Text>
           <Text>Title updates: {syncPreview.titles}</Text>
           {[...preparedImports, ...preparedSync].map((selection) => <Box key={selection.conversation.summary.id} flexDirection="column" marginTop={1}>
             <Text bold>{selection.conversation.summary.title}</Text>
+            {browseMode === "recent" ? <Text>Working directory: {selection.conversation.summary.workspace}</Text> : null}
             <ConversationStatusDetails preview={syncPreviews.get(selection.conversation.summary.id)} checking={false} mode={mode} review />
           </Box>)}
           {preparedImports.length ? <Text>Provider for new tasks: {provider}</Text> : null}

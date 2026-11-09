@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { ConversationStatusDetails, conversationStatusText, discoverTuiDestinations, escapeDestination, helpTextForScreen, ImportTui, replacementStatusText, ReplacementReview, selectionMarker, sourceLabel, StartT3Prompt } from "../src/tui.js";
 import type { ConversationReplacePreview, ConversationSyncPreview, TargetPaths } from "../src/core/types.js";
 import { sourceNames } from "../src/core/providers.js";
-import { canonicalConversation, createTarget } from "./helpers.js";
+import { canonicalConversation, canonicalThread, createTarget } from "./helpers.js";
 import { sourceAdapter } from "../src/sources/index.js";
 import * as runtimeControl from "../src/target/runtimeControl.js";
 
@@ -295,6 +295,57 @@ describe("interactive TUI", () => {
       discover.mockRestore(); load.mockRestore();
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("switches between workspaces and recent conversations while retaining batch selections", async () => {
+    const root = await mkdtemp(join(tmpdir(), "t3-tui-recent-"));
+    const target = createTarget(join(root, "t3"), 67);
+    const older = canonicalConversation(join(root, "older"));older.summary.title = "Older conversation";older.threads[0]!.title = older.summary.title;
+    const newerThread = canonicalThread(join(root, "newer"));newerThread.sourceSessionId = "22222222-2222-4222-8222-222222222222";newerThread.sourceKey = `codex:${newerThread.sourceSessionId}`;newerThread.title = "Newer conversation";
+    const newer = canonicalConversation(newerThread.workspace, newerThread);newer.summary.updatedAt = "2026-02-01T00:00:00.000Z";
+    const adapter = sourceAdapter("codex");
+    const discover = vi.spyOn(adapter, "discover").mockResolvedValue([older.summary, newer.summary, older.summary]);
+    const load = vi.spyOn(adapter, "load").mockImplementation(async (summary, options) => {
+      expect(options.workspace).toBe(summary.workspace);
+      return summary.id === older.summary.id ? older : newer;
+    });
+    const tui = render(<ImportTui paths={target} initialSource="codex" />);
+    try {
+      await waitForFrame(tui, "Choose a workspace");await waitForFrame(tui, newer.summary.workspace);
+      tui.stdin.write("v");
+      const frame = await waitForFrame(tui, "New: 2");
+      expect(frame).toContain("All conversations · most recent first");
+      expect(frame.indexOf(newer.summary.title)).toBeLessThan(frame.indexOf(older.summary.title));
+      expect(frame).toContain(`Working directory: ${newer.summary.workspace}`);
+      tui.stdin.write(" ");await waitForFrame(tui, "Selected: 1");
+      tui.stdin.write("v");await waitForFrame(tui, "Choose a workspace");
+      tui.stdin.write("v");await waitForFrame(tui, "Selected: 1");
+      expect(load).toHaveBeenCalledTimes(2);
+      tui.stdin.write("j");await waitForFrame(tui, `Working directory: ${older.summary.workspace}`);
+      tui.stdin.write(" ");await waitForFrame(tui, "Selected: 2");
+      tui.stdin.write("\r");await waitForFrame(tui, "Use each conversation's workspace project (default)");
+      tui.stdin.write("\r");const review = await waitForFrame(tui, "Review changes");
+      expect(review).toContain("New tasks: 2");expect(review).toContain(older.summary.workspace);expect(review).toContain(newer.summary.workspace);
+      expect(review).toContain("Each selected conversation keeps its own directory");
+    } finally { tui.unmount();discover.mockRestore();load.mockRestore();rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it("Enter reviews an eligible highlighted conversation without requiring Space", async () => {
+    const root = await mkdtemp(join(tmpdir(), "t3-tui-enter-"));
+    const target = createTarget(join(root, "t3"), 67);const conversation = canonicalConversation(root);
+    const adapter = sourceAdapter("codex");const discover = vi.spyOn(adapter, "discover").mockResolvedValue([conversation.summary]);
+    const load = vi.spyOn(adapter, "load").mockResolvedValue(conversation);
+    const tui = render(<ImportTui paths={target} initialSource="codex" initialWorkspace={root} />);
+    try {
+      await waitForFrame(tui, "New: 1");expect(tui.lastFrame()).toContain("Selected: 0");
+      tui.stdin.write("\r");await waitForFrame(tui, "Choose a T3 destination");
+      await waitForFrame(tui, "Create or use the workspace project (default)");
+      tui.stdin.write("\r");const frame = await waitForFrame(tui, "Review changes");
+      expect(frame).toContain("New tasks: 1");
+      const db = new Database(target.dbPath, { readonly: true });
+      try { expect(db.prepare("SELECT count(*) count FROM orchestration_events").get()).toEqual({ count: 0 }); }
+      finally { db.close(); }
+    } finally { tui.unmount();discover.mockRestore();load.mockRestore();rmSync(root, { recursive: true, force: true }); }
   });
 
   it("offers only same-cwd projects plus No project when canonical policy allows it", async () => {

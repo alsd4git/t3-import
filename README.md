@@ -90,6 +90,14 @@ review each conversation's status, select imports or safe updates, and confirm.
 New imports offer compatible destination projects while preserving the source cwd.
 Native "No project" is available only for eligible T3 scratch folders.
 
+Press **v** in the workspace/conversation chooser to switch to all conversations,
+ordered by most recent update, or return to workspace selection. The list scrolls
+with the highlighted row and retains batch selections when changing views.
+**Enter** reviews the highlighted eligible conversation when none are selected;
+**Space** selects conversations for a batch. The selected count is always shown.
+Batches spanning workspaces keep each source directory and use its matching T3
+project. Select a single workspace when choosing a specific compatible project.
+
 [View a static screenshot of the conversation selector](assets/fork-demo.png).
 
 ```sh
