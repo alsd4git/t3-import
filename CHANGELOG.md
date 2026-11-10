@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.8-alsd.1
+
+- Support T3 0.1.8 migration 80 using its pinned official persistence runtime.
+  Preserve scheduled task thread modes through import, sync and replacement,
+  retaining compatibility with earlier supported releases.
+- Verify the official upgrade of populated 0.1.7 databases and runtime activity
+  for scheduled tasks that continue an existing thread or create a new one.
+- Remove unused declarations identified by TypeScript without changing behavior.
+
 ## 0.1.7-alsd.3
 
 - Toggle the interactive chooser between workspaces and all conversations ordered

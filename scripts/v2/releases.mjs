@@ -7,4 +7,5 @@ export const releases = {
   "0.1.5": { directory: "t3-v015", migration: 72, commit: "6d450a4284852af137b2f3407fddd89eb76e7644", archiveSha256: "2920ccdb457acd7c6f00ba95cd92fee3b58df1c6cc768ad2704ca34c1b378f93", effect: "4.0.5", effectPackage: "effect-v011" },
   "0.1.6": { directory: "t3-v016", migration: 76, commit: "2359643cffa6ba9ee84d6f2694b935de54a8013e", archiveSha256: "1c08098314b6356942b3c13312ecb313b07d13de39261b6023cd8ec6b7991f1e", effect: "4.0.5", effectPackage: "effect-v011" },
   "0.1.7": { directory: "t3-v017", migration: 79, commit: "322f6544dfad0a3c8a0c8cbecf2c7f7874b14268", archiveSha256: "8879702bf005f491357acaaebe4b87599123033abad7b96909a1c3b75ee11f56", effect: "4.1.2", effectPackage: "effect-v017" },
+  "0.1.8": { directory: "t3-v018", migration: 80, commit: "bf469bb19669671d0df2efda74ed73867a7137c0", archiveSha256: "bf7a9187e7022bcfbef2b4962774ebd2feca6e1a0a62a3210307e598ef56eaed", effect: "4.1.2", effectPackage: "effect-v017" },
 };

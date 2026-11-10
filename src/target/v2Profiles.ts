@@ -5,6 +5,7 @@ export const v2Profiles: Readonly<Record<number, { directory: string; release: s
   72: { directory: "t3-v015", release: "0.1.4 / 0.1.5" },
   76: { directory: "t3-v016", release: "0.1.6" },
   79: { directory: "t3-v017", release: "0.1.7" },
+  80: { directory: "t3-v018", release: "0.1.8" },
 };
 export const v2Migrations = new Map([
   [55, "OrchestrationV2"], [56, "RemoveRedundantProjectionIndexes"],
@@ -18,5 +19,5 @@ export const v2Migrations = new Map([
   [73, "ActiveTurnItemIndexes"], [74, "ExcludeAttachmentPlaceholdersFromSearch"],
   [75, "SubagentDeliveryState"], [76, "ProjectionProjectsPinArchive"],
   [77, "RepairBooleanSettledOverride"], [78, "DropOrchestrationEventCorrelationIndex"],
-  [79, "DelegatedRecoveryIndexes"],
+  [79, "DelegatedRecoveryIndexes"], [80, "ScheduledTaskThreadMode"],
 ]);

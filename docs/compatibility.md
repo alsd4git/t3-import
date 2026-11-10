@@ -1,8 +1,22 @@
 # T3 compatibility validation
 
-The importer supports V1 database migrations 40–54 and T3 V2 migrations 62, 67, 69, 72, 76 and 79 explicitly. A supported number
+The importer supports V1 database migrations 40–54 and T3 V2 migrations 62, 67, 69, 72, 76, 79 and 80 explicitly. A supported number
 must also pass integrity and required-column checks. This is not a promise that
 every future T3 commit retaining the same migration number will remain compatible.
+
+## T3 0.1.8 / migration 80
+
+The migration 80 writer pins `v0.1.8` to
+`bf469bb19669671d0df2efda74ed73867a7137c0` in `vendor/t3-v018`.
+Migration 80 adds `scheduled_tasks.thread_mode` with the default `new_thread`
+and backfills existing tasks with a non-null `thread_id` to `continue`.
+The official migration preserves the other schedule fields, messages and events.
+The importer never applies migrations to production databases.
+
+The tagged EventSink, ProjectionStore and SQLite client are bundled together;
+this is not a number-only compatibility override. Effect remains 4.1.2 via the
+existing runtime alias. Runtime activity uses task status and due time for both
+thread modes. See the [0.1.8 validation record](v018-validation.md).
 
 ## T3 0.1.7 / migration 79
 

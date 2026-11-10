@@ -40,7 +40,7 @@ function snapshot(directory: string): Record<string, string> {
   return files;
 }
 
-describe.each([40, 76, 79])("live T3 migration %i", (migration) => {
+describe.each([40, 76, 79, 80])("live T3 migration %i", (migration) => {
   it("allows read-only dry-runs but still refuses real writes", async () => {
     const paths = createTarget(join(root, "t3"), migration);
     const conversation = canonicalConversation(root);

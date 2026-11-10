@@ -73,7 +73,7 @@ describe.each(SUPPORTED_MIGRATIONS)("migration %i compatibility", (migration) =>
   });
 });
 
-it.each([39, 55, 70, 71, 73, 74, 75, 77, 78, 80])("rejects unsupported migration %i without writes", async (migration) => {
+it.each([39, 55, 70, 71, 73, 74, 75, 77, 78, 81])("rejects unsupported migration %i without writes", async (migration) => {
   const paths = createTarget(join(root, "t3"), migration);
   const before = readFileSync(paths.dbPath);
   for (const operation of [
