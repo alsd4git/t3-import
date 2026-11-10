@@ -275,7 +275,6 @@ export function planThread(
   const warnings = [...thread.warnings, ...(provider.warning ? [provider.warning] : [])];
   if (thread.turns.some((turn) => turn.status === "inProgress")) warnings.push("Included an active provider snapshot as an interrupted historical turn; it will not be treated as pending in T3.");
   const selection = modelSelection(provider);
-  const latestAt = thread.updatedAt;
   if (includeThreadCreated) events.push(event(seed, "thread.created", "thread", threadId, "thread.created", thread.createdAt, "server", {
     threadId, projectId, title: thread.title, modelSelection: selection, runtimeMode: "full-access", interactionMode: "default", branch: thread.gitBranch ?? null, worktreePath: null, createdAt: thread.createdAt, updatedAt: thread.createdAt,
   }, threadCreatedMetadata));

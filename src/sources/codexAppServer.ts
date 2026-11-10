@@ -89,7 +89,6 @@ export class CodexAppServerSession {
   private constructor(
     private readonly child: ChildProcessWithoutNullStreams,
     private readonly client: CodexRpcClient,
-    private readonly stderr: { value: string },
   ) {}
 
   static async connect(): Promise<CodexAppServerSession> {
@@ -102,7 +101,7 @@ export class CodexAppServerSession {
     const stderr = { value: "" };
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk: string) => { stderr.value += chunk; });
-    const session = new CodexAppServerSession(child, new CodexRpcClient(child), stderr);
+    const session = new CodexAppServerSession(child, new CodexRpcClient(child));
     try {
       await session.client.request("initialize", {
         clientInfo: { name: "t3_import", title: "T3 Import", version: "0.4.1" },

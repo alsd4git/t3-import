@@ -1,4 +1,3 @@
-import React from "react";
 import Database from "better-sqlite3";
 import { render } from "ink-testing-library";
 import { describe, expect, it, vi } from "vitest";

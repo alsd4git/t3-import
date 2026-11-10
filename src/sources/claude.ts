@@ -4,8 +4,6 @@ import { stat } from "node:fs/promises";
 import type {
   CanonicalActivity,
   CanonicalConversation,
-  CanonicalMessage,
-  CanonicalPlan,
   CanonicalThread,
   CanonicalTurn,
   DiscoveryOptions,

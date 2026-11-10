@@ -13,7 +13,7 @@ import type {
 } from "../core/types.js";
 import { isTerminalTurn } from "../core/types.js";
 import { checkpointForThread } from "../core/checkpoint.js";
-import { deterministicUuid, isObject, stringValue } from "../core/util.js";
+import { deterministicUuid, isObject } from "../core/util.js";
 import { safetyError, writeError } from "../core/errors.js";
 import type { TargetOverrides } from "./config.js";
 import { listImports, recordConsolidation, type LedgerRecord, type StoredLedgerRecord } from "./ledger.js";

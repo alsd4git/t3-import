@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { stat } from "node:fs/promises";
 import type {
   CanonicalActivity,
