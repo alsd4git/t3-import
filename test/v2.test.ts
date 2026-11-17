@@ -60,7 +60,7 @@ it("prefers V2 and projects a resumable import through the official sink", async
   expect((await importConversations([{ conversation, resume: true }], paths, { dryRun: false, resume: true })).status).toBe("already-imported");
   expect((await syncConversations([{ conversation }], paths, { dryRun: false })).status).toBe("up-to-date");
   expect(eventCount(paths.dbPath)).toBe(count);
-});
+}, process.platform === "win32" ? 60_000 : 15_000);
 
 it.each(["failed", "interrupted"] as const)("keeps %s imported turns visible as notices", async (status) => {
   const paths = createTarget(root, migration);

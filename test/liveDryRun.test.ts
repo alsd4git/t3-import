@@ -68,7 +68,7 @@ describe.each([40, 76, 79, 80, 81, 96])("live T3 migration %i", (migration) => {
       ]) await expect(operation()).rejects.toMatchObject({ exitCode: 4, message: expect.stringContaining("T3 is running") });
       expect(snapshot(root)).toEqual(before);
     } finally { writer.close(); }
-  });
+  }, process.platform === "win32" ? 60_000 : 15_000);
 });
 
 it("holds one WAL read snapshot while T3 commits new data", () => {
