@@ -1,6 +1,6 @@
 {
   "name": "@alsdd/t3-import",
-  "version": "0.1.8-alsd.1",
+  "version": "0.1.10-alsd.1",
   "description": "Import and sync Codex, Claude Code, and OpenCode conversations into T3 Code",
   "keywords": [
     "t3code",
@@ -40,6 +40,8 @@
     "vendor/t3-v016",
     "vendor/t3-v017",
     "vendor/t3-v018",
+    "vendor/t3-v019",
+    "vendor/t3-v0110",
     "README.md",
     "CHANGELOG.md",
     "assets/fork-demo.png",
@@ -79,7 +81,8 @@
     "env-paths": "^3.0.0",
     "ink": "^6.2.3",
     "react": "^19.1.1",
-    "zod": "^4.0.17"
+    "zod": "^4.0.17",
+    "effect-v0110": "npm:effect@4.1.3"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

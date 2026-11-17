@@ -1,8 +1,19 @@
 # T3 compatibility validation
 
-The importer supports V1 database migrations 40–54 and T3 V2 migrations 62, 67, 69, 72, 76, 79 and 80 explicitly. A supported number
+The importer supports V1 database migrations 40–54 and T3 V2 migrations 62, 67, 69, 72, 76, 79, 80, 81 and 96 explicitly. A supported number
 must also pass integrity and required-column checks. This is not a promise that
 every future T3 commit retaining the same migration number will remain compatible.
+
+## T3 0.1.9 and 0.1.10 / migrations 81 and 96
+
+Separate official runtimes pin v0.1.9 to `24e77473ecf41bc1f7142529c7911c1c1aae1d76`
+and v0.1.10 to `7d32075e3757ded707914e2450c3e392a9665765`.
+Migration 81 adds readable citation search text and updates the FTS triggers.
+Migrations 82–96 add read indexes, maintained turn-item counts, custom project
+names, T3 Connect authentication fields, inline work output, and stale title-job
+repair. The 0.1.10 runtime uses Effect 4.1.3; older runtimes retain their pins.
+Intermediate schemas 82–95 remain unsupported. T3 owns upgrades; the importer
+never migrates a user's database. See [validation](v0110-validation.md).
 
 ## T3 0.1.8 / migration 80
 

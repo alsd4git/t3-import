@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.10-alsd.1
+
+- Support T3 0.1.9 migration 81 and T3 0.1.10 migration 96 with separate pinned official runtimes.
+- Preserve citation search text, maintained item counts, and custom project title state during import and sync.
+- Validate populated schema upgrades, historical compatibility, read-only live dry-runs, and the installed release artifact.
+
 ## 0.1.8-alsd.1
 
 - Support T3 0.1.8 migration 80 using its pinned official persistence runtime.

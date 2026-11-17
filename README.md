@@ -37,10 +37,10 @@ t3-import --version
 For a pinned GitHub release without the npm registry:
 
 ```sh
-npm i -g --allow-scripts=better-sqlite3 https://github.com/alsd4git/t3-import/releases/download/v0.1.8-alsd.1/alsdd-t3-import-0.1.8-alsd.1.tgz
+npm i -g --allow-scripts=better-sqlite3 https://github.com/alsd4git/t3-import/releases/download/v0.1.10-alsd.1/alsdd-t3-import-0.1.10-alsd.1.tgz
 ```
 
-Versions follow `<T3 version>-alsd.<revision>`. `0.1.8-alsd.1` targets T3 0.1.8
+Versions follow `<T3 version>-alsd.<revision>`. `0.1.10-alsd.1` targets T3 0.1.10
 and retains the earlier compatibility shown below. npm installs the default
 `latest` channel; no `@next` suffix is required.
 
@@ -60,6 +60,8 @@ install-script behavior still applies.
 | T3 0.1.6 / Orchestrator V2 | 76 | Codex, Claude Code, OpenCode |
 | T3 0.1.7 / Orchestrator V2 | 79 | Codex, Claude Code, OpenCode |
 | T3 0.1.8 / Orchestrator V2 | 80 | Codex, Claude Code, OpenCode |
+| T3 0.1.9 / Orchestrator V2 | 81 | Codex, Claude Code, OpenCode |
+| T3 0.1.10 / Orchestrator V2 | 96 | Codex, Claude Code, OpenCode |
 
 Use **Node.js 22.21.1+ or 24+**. Unknown schemas, including intermediate V2
 migrations, are refused. T3 owns database upgrades; the importer never migrates

@@ -8,4 +8,6 @@ export const releases = {
   "0.1.6": { directory: "t3-v016", migration: 76, commit: "2359643cffa6ba9ee84d6f2694b935de54a8013e", archiveSha256: "1c08098314b6356942b3c13312ecb313b07d13de39261b6023cd8ec6b7991f1e", effect: "4.0.5", effectPackage: "effect-v011" },
   "0.1.7": { directory: "t3-v017", migration: 79, commit: "322f6544dfad0a3c8a0c8cbecf2c7f7874b14268", archiveSha256: "8879702bf005f491357acaaebe4b87599123033abad7b96909a1c3b75ee11f56", effect: "4.1.2", effectPackage: "effect-v017" },
   "0.1.8": { directory: "t3-v018", migration: 80, commit: "bf469bb19669671d0df2efda74ed73867a7137c0", archiveSha256: "bf7a9187e7022bcfbef2b4962774ebd2feca6e1a0a62a3210307e598ef56eaed", effect: "4.1.2", effectPackage: "effect-v017" },
+  "0.1.9": { directory: "t3-v019", migration: 81, commit: "24e77473ecf41bc1f7142529c7911c1c1aae1d76", archiveSha256: "5f54e655d61d14a3daf9efd9291802fd04f0f265476053a9aacceed4d31d049d", effect: "4.1.2", effectPackage: "effect-v017" },
+  "0.1.10": { directory: "t3-v0110", migration: 96, commit: "7d32075e3757ded707914e2450c3e392a9665765", archiveSha256: "4e4f3a6ae8e08d10d85133ae60e4b136503fbb838cdb7ec2535a2aa4b50f4adc", effect: "4.1.3", effectPackage: "effect-v0110" },
 };
